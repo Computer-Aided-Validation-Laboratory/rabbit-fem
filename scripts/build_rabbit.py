@@ -2,11 +2,12 @@
 """Build and package the rabbit MOOSE distribution.
 
 Uses zig cc via ziglang as the compiler toolchain, compiles
-RabbitApp, strips binaries, and stages artifacts for wheel packaging.
+RabbitApp, strips binaries, and stages minimal artifacts for wheel packaging.
 """
 
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -62,7 +63,8 @@ def setup_zig_wrappers(repo_dir: Path) -> tuple[Path, Path]:
     inc_flags = " ".join(detect_system_include_flags(wrapper_dir))
     warn_flags = (
         "-Wno-date-time -Wno-error=date-time "
-        "-Wno-ignored-attributes -Wno-unused-command-line-argument"
+        "-Wno-ignored-attributes -Wno-unused-command-line-argument "
+        "-fno-sanitize=all"
     )
 
     zigcc_path = wrapper_dir / "zigcc"
@@ -76,7 +78,8 @@ def setup_zig_wrappers(repo_dir: Path) -> tuple[Path, Path]:
         "    if [ \"$arg\" = \"-shared\" ]; then\n"
         "        extra_link=\"-nostartfiles\"\n"
         "    fi\n"
-        "    if [ \"$arg\" != \"-lstdc++\" ]; then\n"
+        "    if [ \"$arg\" != \"-lstdc++\" ] && "
+        "[ \"$arg\" != \"-lstdc++fs\" ]; then\n"
         "        filtered_args+=(\"$arg\")\n"
         "    fi\n"
         "done\n"
@@ -98,7 +101,8 @@ def setup_zig_wrappers(repo_dir: Path) -> tuple[Path, Path]:
         "    if [ \"$arg\" = \"-shared\" ]; then\n"
         "        extra_link=\"-nostartfiles\"\n"
         "    fi\n"
-        "    if [ \"$arg\" != \"-lstdc++\" ]; then\n"
+        "    if [ \"$arg\" != \"-lstdc++\" ] && "
+        "[ \"$arg\" != \"-lstdc++fs\" ]; then\n"
         "        filtered_args+=(\"$arg\")\n"
         "    fi\n"
         "done\n"
@@ -151,6 +155,7 @@ def build_rabbit_binary(
 ) -> Path:
     """Compile RabbitApp and link rabbit-opt."""
     env = dict(os.environ)
+    env["PATH"] = f"{repo_dir / '.venv' / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONNOUSERSITE"] = "1"
     env["MOOSE_DIR"] = str(moose_dir)
     env["METHODS"] = "opt"
@@ -174,7 +179,14 @@ def build_rabbit_binary(
     wasp_dir = moose_dir / "framework" / "contrib" / "wasp" / "install"
 
     output_bin = repo_dir / "rabbit-opt"
-    omp_lib = repo_dir / "src" / "rabbit" / "lib" / "libomp.so"
+
+    omp_lib = ""
+    omp_candidates = glob.glob("/opt/rocm-*/lib/llvm/lib-debug/libomp.so")
+    if omp_candidates:
+        omp_lib = omp_candidates[-1]
+    elif (repo_dir / "src" / "rabbit" / "lib" / "libomp.so").is_file():
+        omp_lib = str(repo_dir / "src" / "rabbit" / "lib" / "libomp.so")
+
     link_cmd = [
         find_python_exe(), "-m", "ziglang", "c++",
         "-target", "x86_64-linux-gnu",
@@ -199,16 +211,21 @@ def build_rabbit_binary(
         "-lwaspcore", "-lwaspddi", "-lwaspexpr", "-lwasphalite",
         "-lwasphit", "-lwasphive", "-lwaspjson", "-lwasplsp",
         "-lwaspplot", "-lwaspsiren", "-lwaspson",
+        f"-L{moose_dir}/framework/contrib/hit/.libs", "-lhit-opt",
         f"-L{libmesh_dir}/lib", "-lmesh_opt", "-ltimpi_opt",
         f"-L{petsc_dir}/lib", "-lpetsc",
         "-L/usr/lib/x86_64-linux-gnu/openmpi/lib", "-lmpi_cxx", "-lmpi",
         "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
-        str(omp_lib),
+    ]
+    if omp_lib:
+        link_cmd.append(omp_lib)
+
+    link_cmd.extend([
         "-Wl,--as-needed",
         "-Wl,--allow-shlib-undefined",
         "-Wl,-rpath,$ORIGIN/../lib",
         "-Wl,-rpath,/usr/lib/x86_64-linux-gnu/openmpi/lib",
-    ]
+    ])
 
     print("Linking rabbit-opt executable with zig toolchain...")
     subprocess.run(link_cmd, check=True)
@@ -220,79 +237,103 @@ def build_rabbit_binary(
     return output_bin
 
 
+def find_needed_libraries(
+    binary_path: Path,
+    available_libs: dict[str, Path],
+) -> dict[str, Path]:
+    """Find all needed sonames and map them to their concrete file paths."""
+    resolved_libs: dict[str, Path] = {}
+    queue: list[Path] = [binary_path]
+    visited_binaries: set[Path] = set()
+
+    while queue:
+        current = queue.pop(0)
+        if current in visited_binaries:
+            continue
+        visited_binaries.add(current)
+
+        try:
+            cmd = ["readelf", "-d", str(current)]
+            res = subprocess.run(
+                cmd, capture_output=True, text=True, check=True
+            )
+            for line in res.stdout.splitlines():
+                if "NEEDED" not in line:
+                    continue
+                match = re.search(r"\[(.*)\]", line)
+                if not match:
+                    continue
+                soname = match.group(1)
+                if soname.startswith(("libc.so", "libm.so", "libdl.so",
+                                      "libpthread.so", "librt.so",
+                                      "libstdc++.so", "libgcc_s.so",
+                                      "libmpi.so", "libmpi_cxx.so",
+                                      "libopen-pal.so", "libopen-rte.so",
+                                      "libhwloc.so", "libevent",
+                                      "libz.so", "libtirpc.so",
+                                      "libgfortran.so", "libgomp.so",
+                                      "libudev.so", "libkrb5", "libk5crypto",
+                                      "libcom_err", "libcap.so", "libkeyutils",
+                                      "libresolv.so", "libgssapi_krb5")):
+                    continue
+
+                if soname not in resolved_libs:
+                    if soname in available_libs:
+                        real_path = available_libs[soname].resolve()
+                        resolved_libs[soname] = real_path
+                        queue.append(real_path)
+        except Exception:
+            pass
+
+    return resolved_libs
+
+
 def stage_artifacts(
     repo_dir: Path,
     moose_dir: Path,
     binary_path: Path,
 ) -> None:
-    """Stage executable and libraries into src/rabbit for packaging."""
+    """Stage executable and minimal shared libraries into src/rabbit."""
     bin_target_dir = repo_dir / "src" / "rabbit" / "bin"
     lib_target_dir = repo_dir / "src" / "rabbit" / "lib"
-    bin_target_dir.mkdir(parents=True, exist_ok=True)
+
+    # Reset staging directories to remove obsolete / duplicate files
+    if lib_target_dir.is_dir():
+        shutil.rmtree(lib_target_dir)
     lib_target_dir.mkdir(parents=True, exist_ok=True)
+    bin_target_dir.mkdir(parents=True, exist_ok=True)
 
     dest_bin = bin_target_dir / "rabbit"
     shutil.copy2(binary_path, dest_bin)
     dest_bin.chmod(0o755)
 
-    # Collect shared libraries
-    libmesh_dir = moose_dir / "libmesh" / "installed" / "lib"
-    petsc_dir = moose_dir / "petsc" / "arch-moose" / "lib"
-    wasp_dir = moose_dir / "framework" / "contrib" / "wasp" / "install" / "lib"
+    # Build lookup map of all available .so files in moose and rabbit repos
+    available_libs: dict[str, Path] = {}
+    for search_root in [repo_dir, moose_dir]:
+        for p in search_root.rglob("*.so*"):
+            if p.is_file() and not p.name.endswith((".son", ".i")):
+                available_libs[p.name] = p
 
-    so_sources: list[Path] = []
-    so_sources.extend((repo_dir / "lib").rglob("*.so*"))
-    so_sources.extend((moose_dir / "framework").rglob("*.so*"))
+    resolved_libs = find_needed_libraries(binary_path, available_libs)
 
-    active_modules = [
-        "solid_mechanics",
-        "heat_transfer",
-        "contact",
-        "shifted_boundary_method",
-        "ray_tracing",
-        "module_loader",
-    ]
-    for mod in active_modules:
-        mod_lib = moose_dir / "modules" / mod / "lib"
-        if mod_lib.is_dir():
-            so_sources.extend(mod_lib.rglob("*.so*"))
-
-    if libmesh_dir.is_dir():
-        so_sources.extend(libmesh_dir.rglob("*.so*"))
-    if petsc_dir.is_dir():
-        so_sources.extend(petsc_dir.rglob("*.so*"))
-    if wasp_dir.is_dir():
-        so_sources.extend(wasp_dir.rglob("*.so*"))
-
-    for f in so_sources:
-        if f.suffix in [".son", ".i"] or not f.name.startswith("lib"):
-            continue
-        dest = lib_target_dir / f.name
-        if f.is_file() and not f.is_symlink():
-            shutil.copy2(f, dest)
-        elif f.is_symlink():
-            if dest.exists() or dest.is_symlink():
-                dest.unlink()
-            try:
-                dest.symlink_to(f.readlink())
-            except Exception:
-                pass
-
-    # Bundle libomp if present
+    # Copy libomp if available
     omp_candidates = glob.glob("/opt/rocm-*/lib/llvm/lib-debug/libomp.so")
     if omp_candidates:
-        shutil.copy2(omp_candidates[-1], lib_target_dir / "libomp.so")
+        resolved_libs["libomp.so"] = Path(omp_candidates[-1]).resolve()
 
-    # Strip libraries and executable
+    for soname, real_path in resolved_libs.items():
+        dest = lib_target_dir / soname
+        shutil.copy2(real_path, dest)
+
+    # Strip debug symbols
     print("Stripping debug symbols from libraries and executable...")
     subprocess.run(["strip", "--strip-all", str(dest_bin)], check=False)
     for f in lib_target_dir.glob("*.so*"):
-        if f.is_file() and not f.is_symlink() and f.name.startswith("lib"):
+        if f.is_file():
             subprocess.run(["strip", "--strip-unneeded", str(f)], check=False)
 
     # Patch RPATHs with patchelf
     patchelf_bin = shutil.which("patchelf") or "patchelf"
-
     rpath_app = "$ORIGIN/../lib:/usr/lib/x86_64-linux-gnu/openmpi/lib"
     rpath_lib = "$ORIGIN:/usr/lib/x86_64-linux-gnu/openmpi/lib"
 
@@ -301,19 +342,26 @@ def stage_artifacts(
         check=False,
     )
     for f in lib_target_dir.glob("*.so*"):
-        if f.is_file() and not f.is_symlink() and f.name.startswith("lib"):
+        if f.is_file():
             subprocess.run(
                 [patchelf_bin, "--set-rpath", rpath_lib, str(f)],
                 check=False,
             )
 
-    print(f"Staged rabbit binary at {dest_bin}")
+    print(
+        f"Staged rabbit binary and {len(resolved_libs)} libraries "
+        f"at {dest_bin}"
+    )
 
 
 def main() -> None:
     """Main build orchestration entry point."""
     repo_dir = Path(__file__).resolve().parent.parent
     zigcc_path, zigcxx_path = setup_zig_wrappers(repo_dir)
+
+    if "--setup-wrappers" in sys.argv:
+        print(f"Generated Zig CC wrappers at {zigcc_path.parent}")
+        return
 
     moose_dir = get_moose_dir(repo_dir)
     binary_path = build_rabbit_binary(

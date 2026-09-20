@@ -28,6 +28,24 @@ def get_library_dir() -> Path:
     return base_dir / "lib"
 
 
+def format_cli_args(raw_args: list[str]) -> list[str]:
+    """Normalize CLI arguments, adding -i if a .i file is passed directly."""
+    has_input_flag = any(arg in ("-i", "--input") for arg in raw_args)
+    if has_input_flag:
+        return raw_args
+
+    formatted: list[str] = []
+    input_handled = False
+    for arg in raw_args:
+        is_input = not arg.startswith("-") and arg.endswith(".i")
+        if not input_handled and is_input:
+            formatted.extend(["-i", arg])
+            input_handled = True
+        else:
+            formatted.append(arg)
+    return formatted
+
+
 def main() -> None:
     """Run the rabbit application with forwarded CLI arguments."""
     try:
@@ -45,7 +63,8 @@ def main() -> None:
         else:
             env["LD_LIBRARY_PATH"] = str(lib_dir)
 
-    args = [str(bin_path)] + sys.argv[1:]
+    processed_args = format_cli_args(sys.argv[1:])
+    args = [str(bin_path)] + processed_args
     try:
         os.execvpe(str(bin_path), args, env)
     except OSError as err:
