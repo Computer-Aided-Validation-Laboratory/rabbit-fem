@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rabbit-fem"
+version = "0.1.0"
+description = "Lightweight MOOSE distribution packaging thermal and solid mechanics"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "LGPL-2.1"
+authors = [
+    { name = "Rabbit Contributors" },
+]
+dependencies = [
+    "ziglang>=0.16.0",
+    "patchelf>=0.17",
+]
+
+[project.scripts]
+rabbit = "rabbit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rabbit"]
+artifacts = [
+    "src/rabbit/bin/*",
+    "src/rabbit/lib/*",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/include",
+    "/scripts",
+    "/Makefile",
+    "/build.zig",
+    "/README.md",
+    "/LICENSE",
+]
