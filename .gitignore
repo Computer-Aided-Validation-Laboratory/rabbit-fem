@@ -5,15 +5,17 @@ refs/
 .*/
 
 # MOOSE and Rabbit build artifacts
+moose/
 rabbit-opt
 rabbit-devel
 rabbit-dbg
+null.o
 src/rabbit/bin/
 src/rabbit/lib/
+
 .zig_wrappers/
 .zig-cache/
 zig-out/
-test/
 *.lo
 *.o
 *.la
@@ -25,7 +27,9 @@ test/
 *.e
 *.e-s*
 *.csv
+!src/rabbit/sims/**/*.csv
 *~
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

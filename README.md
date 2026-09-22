@@ -1,172 +1,170 @@
 # rabbit-fem
 
-`rabbit-fem` is a lightweight, standalone Python distribution of the [MOOSE](https://mooseframework.inl.gov/) (Multiphysics Object-Oriented Simulation Environment) finite element framework, tailored specifically for **thermal**, **solid mechanics**, and **contact** simulations.
+`rabbit-fem` is a lightweight, standalone Python distribution of the [MOOSE](https://mooseframework.inl.gov/) (Multiphysics Object-Oriented Simulation Environment) finite element framework, tailored specifically for **thermal**, **solid mechanics**, and **contact** simulation.
 
-Packaged as a self-contained Python wheel under 60 MB (well below PyPI's 100 MB compressed limit), `rabbit-fem` provides a drop-in `rabbit` command-line executable that runs MOOSE input files without requiring external MOOSE or libMesh system installations.
+Packaged as a self-contained Python wheel (~60 MB), `rabbit-fem` provides a drop-in `rabbit` command-line executable and Python dataset API that runs MOOSE simulations without requiring external MOOSE or libMesh system installations.
 
 ---
 
-## Features
+## Key Features
 
 - **Focused Thermo-Mechanical Physics**: Preconfigured with `SolidMechanics`, `HeatTransfer`, `Contact`, `RayTracing`, and `ShiftedBoundaryMethod` modules.
-- **Lightweight Distribution**: Only 59 MB compressed wheel containing stripped, optimized Linux x86_64 ELF binaries and shared libraries.
-- **Drop-In CLI**: Run simulations using `rabbit input.i` or `rabbit -i input.i` identically to native MOOSE applications.
-- **Zig Toolchain Orchestration**: Compiled and linked using `zig cc` / `zig c++` via the `ziglang` Python package and `build.zig`.
+- **Self-Contained & Relocatable**: Bundles stripped ELF binaries and shared libraries linked via `$ORIGIN` with zero external MOOSE dependency at runtime.
+- **Drop-In CLI**: Execute MOOSE input files using `rabbit input.i` or `rabbit -i input.i`.
+- **Packaged Simulation Datasets**: Includes standard benchmarks and Gmsh geometry scripts accessible directly through Python.
+- **Zig Toolchain Orchestration**: Compiled and linked using `zig cc` / `zig c++` via `ziglang` and `build.zig`.
 
 ---
 
 ## Installation
 
-### From Wheel
-
-Install `rabbit-fem` directly using `pip` or `uv`:
+Install `rabbit-fem` directly from the standalone wheel:
 
 ```bash
 # Using pip
-pip install rabbit_fem-0.1.0-py3-none-any.whl
+pip install dist/rabbit_fem-*.whl
 
 # Using uv
-uv pip install rabbit_fem-0.1.0-py3-none-any.whl
+uv pip install dist/rabbit_fem-*.whl
 ```
+
 
 ---
 
 ## Usage
 
-### Running Simulations
+### 1. Running Simulations with the `rabbit` CLI
 
-Execute any MOOSE input file directly:
+Execute any MOOSE `.i` input file directly from your terminal:
 
 ```bash
-# Direct positional argument
-rabbit examples/tensile_test.i
+# Run a packaged thermo-mechanical benchmark directly
+rabbit -i $(python -c "from rabbit.sims import cube_thermomech_input_path, EElemType; print(cube_thermomech_input_path(EElemType.HEX8))")
 
-# Or standard MOOSE -i flag
-rabbit -i examples/tensile_test.i
+# Or run any local MOOSE simulation
+rabbit simulation.i
 ```
 
-### Parallel Execution with MPI
-
-`rabbit` supports multi-core execution using OpenMPI:
+Run in parallel using OpenMPI:
 
 ```bash
-mpirun -n 4 rabbit examples/tensile_test.i
+mpirun -n 4 rabbit simulation.i
 ```
 
-### Command-Line Options
+### 2. Python Dataset and Simulation Runner API
 
-All standard MOOSE command-line options and parameters are supported:
+`rabbit-fem` packages simulation files and provides helpers to locate inputs, generate meshes with Gmsh, and execute solves:
+
+```python
+from rabbit.sims import (
+    EElemType,
+    cube_thermomech_input_path,
+    run_rabbit,
+)
+
+# Locate packaged HEX8 thermo-mechanical cube input
+input_file = cube_thermomech_input_path(EElemType.HEX8)
+
+# Execute rabbit on the simulation
+result = run_rabbit(input_file)
+print("Simulation completed with return code:", result.returncode)
+```
+
+---
+
+## Examples
+
+Runnable example scripts demonstrating Gmsh mesh generation and MOOSE simulation execution are located in [`src/rabbit/examples/`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/):
+
+- [`ex0_cube.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex0_cube.py) — 3D thermo-mechanical cube benchmark on structured HEX8 elements.
+- [`ex1_dogbone.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex1_dogbone.py) — 2D tensile dogbone mesh generation in Gmsh and linear elastic solve.
+- [`ex2_tensile_plate.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex2_tensile_plate.py) — 2D plate with a central hole mesh in Gmsh and elastic tension solve.
+- [`ex3_stc_thermal.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex3_stc_thermal.py) — 3D single thermal component (STC) with radiation and temperature-dependent conductivity.
+- [`ex4_monoblock_thermomech.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex4_monoblock_thermomech.py) — 3D monoblock fusion component mesh generation and coupled thermo-mechanical solve.
+
+Run any example with:
 
 ```bash
-# Display application options and syntax help
-rabbit --help
-
-# Dump YAML/JSON input syntax tree
-rabbit --json
-
-# Run mesh checking without solving
-rabbit examples/tensile_test.i --mesh-only
+uv run python src/rabbit/examples/ex0_cube.py
+uv run python src/rabbit/examples/ex1_dogbone.py
 ```
 
 ---
 
 ## Build from Source
 
+Building `rabbit-fem` is managed through a single orchestrator script: [`build_rabbit.py`](file:///home/lloydf/rabbit-fem/build_rabbit.py).
+
 ### Prerequisites
 
-- **OS**: Linux x86_64 (Ubuntu 22.04+ or compatible distribution)
-- **Python**: Python 3.9+ with [`uv`](https://docs.astral.sh/uv/) installed
-- **System Packages**:
-  ```bash
-  sudo apt-get update && sudo apt-get install -y \
-      build-essential gfortran libopenmpi-dev openmpi-bin \
-      patchelf libtinfo6 libz-dev
-  ```
-
-### Step 1: Clone and Prepare MOOSE
-
-Clone the MOOSE repository or set `MOOSE_DIR` to your local clone:
+- **OS**: Linux x86_64 (Ubuntu 22.04+ or compatible)
+- **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`
+- **Python**: Python 3.10+ with [`uv`](https://docs.astral.sh/uv/)
 
 ```bash
-# Clone MOOSE if not already available
-git clone https://github.com/idaholab/moose.git ~/moose
-export MOOSE_DIR=~/moose
-```
+sudo apt-get update && sudo apt-get install -y \
+    build-essential gfortran libopenmpi-dev openmpi-bin patchelf
 
-### Step 2: Set Up Python Virtual Environment
-
-```bash
-cd /path/to/rabbit-fem
+# Set up Python environment
 uv venv .venv
 source .venv/bin/activate
-uv pip install ziglang patchelf hatchling
+uv pip install -e ".[dev]"
 ```
 
-### Step 3: Compile MOOSE Subsystems with Zig Toolchain
+---
 
-Compile `libmesh` and `wasp` in the MOOSE directory using the Zig wrapper scripts generated by `scripts/build_rabbit.py`:
+### The 2-Step Build Flow
+
+```mermaid
+flowchart LR
+    subgraph Step1["Step 1: MOOSE Dependencies (One-Time)"]
+        A["uv run python build_rabbit.py --moose"]
+    end
+    subgraph Step2["Step 2: Build, Stage & Wheel"]
+        B["uv run python build_rabbit.py --wheel --test"]
+    end
+    Step1 --> Step2
+```
+
+#### Step 1: Upstream MOOSE Dependencies (One-Time Setup)
+
+Clones upstream MOOSE (if needed), compiles PETSc, libMesh, and WASP, and configures MOOSE:
 
 ```bash
-# Generate Zig wrapper toolchain in .zig_wrappers/
-python3 scripts/build_rabbit.py --setup-wrappers
-
-# Compile libmesh with zig toolchain
-cd $MOOSE_DIR/libmesh
-./configure \
-    CC="$(pwd)/../../rabbit-fem/.zig_wrappers/zigcc" \
-    CXX="$(pwd)/../../rabbit-fem/.zig_wrappers/zigcxx" \
-    --enable-silent-rules \
-    --enable-unique-id \
-    --disable-warnings \
-    --disable-netgen \
-    --disable-parmetis \
-    --disable-metis \
-    --with-methods="opt" \
-    --prefix="$(pwd)/installed"
-make -j$(nproc) && make install
-
-# Compile netcdf with -O3 -fno-sanitize=all
-cd $MOOSE_DIR/libmesh/build/contrib/netcdf/netcdf-c-4.6.2
-make CFLAGS="-O3 -fno-sanitize=all" -j$(nproc) && make install
-
-# Compile wasp parser library
-cd $MOOSE_DIR/framework/contrib/wasp
-./build.sh
+uv run python build_rabbit.py --moose
 ```
+*(Optionally pass a custom path: `--moose /path/to/moose`)*
 
-### Step 4: Build and Stage Rabbit
+#### Step 2: Build Rabbit, Stage Artifacts & Package Wheel
 
-Run the automated build script to compile `RabbitApp`, link the binary, strip symbols, and stage libraries:
+Compiles RabbitApp with the Zig toolchain, strips symbols, rewrites RPATHs with `patchelf`, packages the `.whl` into `dist/`, and runs tests:
 
 ```bash
-cd /path/to/rabbit-fem
-uv run python scripts/build_rabbit.py
+uv run python build_rabbit.py --wheel --test
 ```
 
-Alternatively, you can invoke the build using `zig build`:
+---
+
+### `build_rabbit.py` Command Reference
+
+| Command / Flag | Description |
+|---|---|
+| `uv run python build_rabbit.py --moose [PATH]` | Build upstream MOOSE dependencies (PETSc, libMesh, WASP) |
+| `uv run python build_rabbit.py` | Compile Rabbit and stage relocatable binaries in `src/rabbit/` |
+| `uv run python build_rabbit.py --wheel` | Compile Rabbit, stage artifacts, and build wheel in `dist/` |
+| `uv run python build_rabbit.py --wheel-only` | Package existing staged artifacts into `dist/*.whl` without recompiling |
+| `uv run python build_rabbit.py --test` | Run pytest simulation and binary relocatability test suite |
+| `uv run python build_rabbit.py --all` | Full pipeline: MOOSE build, Rabbit build, staging, wheel, and tests |
+
+Alternatively, you can trigger the build using the Zig build system:
 
 ```bash
 zig build
 ```
 
-### Step 5: Package and Verify Wheel
-
-Build the Python wheel package:
-
-```bash
-uv build --wheel
-```
-
-Verify that the generated wheel in `dist/` is under 100 MB and test the installation:
-
-```bash
-ls -lh dist/*.whl
-uv pip install --force-reinstall dist/*.whl
-rabbit examples/tensile_test.i
-```
 
 ---
 
 ## License
 
-`rabbit-fem` is distributed under the GNU Lesser General Public License v2.1 (LGPL-2.1), matching the MOOSE framework license.
+`rabbit-fem` is distributed under the GNU Lesser General Public License v2.1 (LGPL-2.1), matching the MOOSE framework license. See [`LICENSE`](file:///home/lloydf/rabbit-fem/LICENSE) for details.

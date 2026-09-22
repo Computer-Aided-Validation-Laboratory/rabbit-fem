@@ -1,17 +1,28 @@
-#!/usr/bin/env python3
+# ------------------------------------------------------------------------------
+# Rabbit: A lightweight MOOSE distribution for thermo-mechanical simulation
+#
+# Copyright (c) 2026 scepticalrabbit (Lloyd Fletcher)
+# Licensed under the GNU Lesser General Public License v2.1
+# See LICENSE for details.
+#
+# Authors: scepticalrabbit (Lloyd Fletcher)
+# ------------------------------------------------------------------------------
+
 """Build and package the rabbit MOOSE distribution.
 
-Uses zig cc via ziglang as the compiler toolchain, compiles
-RabbitApp, strips binaries, and stages minimal artifacts for wheel packaging.
+Single entry point to build upstream MOOSE dependencies, compile RabbitApp
+using the Zig compiler toolchain, stage relocatable libraries, build standalone
+wheels, and run test verification.
 """
 
+import argparse
 import glob
 import os
+from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 
 def find_python_exe() -> str:
@@ -128,23 +139,98 @@ def setup_zig_wrappers(repo_dir: Path) -> tuple[Path, Path]:
     return zigcc_path, zigcxx_path
 
 
-def get_moose_dir(repo_dir: Path) -> Path:
-    """Locate MOOSE directory from environment or standard locations."""
+def get_moose_dir(
+    repo_dir: Path, custom_path: str | None = None
+) -> Path:
+    """Locate MOOSE directory from argument, local repo, env, or home."""
+    if custom_path:
+        return Path(custom_path).expanduser().resolve()
+
+    local_moose = repo_dir / "moose"
+    if local_moose.is_dir() and (local_moose / "framework").is_dir():
+        return local_moose.resolve()
+
     env_dir = os.environ.get("MOOSE_DIR")
     if env_dir and Path(env_dir).is_dir():
         return Path(env_dir).resolve()
 
-    submodule_dir = repo_dir / "moose"
-    if submodule_dir.is_dir() and (submodule_dir / "framework").is_dir():
-        return submodule_dir.resolve()
+    return (repo_dir / "moose").resolve()
 
-    home_moose = Path.home() / "moose"
-    if home_moose.is_dir():
-        return home_moose.resolve()
 
-    raise FileNotFoundError(
-        "MOOSE directory not found. Please set MOOSE_DIR environment variable."
+
+def build_moose_dependencies(moose_dir: Path) -> None:
+    """Clone upstream MOOSE (if missing) and compile PETSc, libMesh, WASP."""
+    jobs = os.environ.get("MOOSE_JOBS", str(os.cpu_count() or 4))
+    print("=" * 60)
+    print(f" Setting up MOOSE and dependencies at: {moose_dir}")
+    print(f" Parallel jobs: {jobs}")
+    print("=" * 60)
+
+    if not moose_dir.is_dir():
+        print("Cloning upstream MOOSE repository...")
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "https://github.com/idaholab/moose.git",
+                str(moose_dir),
+            ],
+            check=True,
+        )
+    else:
+        print(f"MOOSE repository found at {moose_dir}")
+
+    # 1. Build PETSc
+    print("--> Building PETSc...")
+    petsc_env = dict(os.environ)
+    petsc_env.pop("PETSC_DIR", None)
+    petsc_env.pop("PETSC_ARCH", None)
+    subprocess.run(
+        [
+            "./scripts/update_and_rebuild_petsc.sh",
+            "--skip-submodule-update",
+            "--CXXOPTFLAGS=-O3",
+            "--COPTFLAGS=-O3",
+            "--FOPTFLAGS=-O3",
+        ],
+        cwd=str(moose_dir),
+        env=petsc_env,
+        check=True,
     )
+
+    # 2. Build libMesh
+    print("--> Building libMesh...")
+    libmesh_env = dict(os.environ)
+    libmesh_env["METHODS"] = "opt"
+    subprocess.run(
+        [
+            "./scripts/update_and_rebuild_libmesh.sh",
+            "--with-mpi",
+        ],
+        cwd=str(moose_dir),
+        env=libmesh_env,
+        check=True,
+    )
+
+    # 3. Build WASP
+    print("--> Building WASP parser...")
+    subprocess.run(
+        ["./scripts/update_and_rebuild_wasp.sh"],
+        cwd=str(moose_dir),
+        check=True,
+    )
+
+    # 4. Configure MOOSE
+    print("--> Configuring MOOSE...")
+    subprocess.run(
+        ["./configure", "--with-derivative-size=89"],
+        cwd=str(moose_dir),
+        check=True,
+    )
+
+    print("=" * 60)
+    print(" MOOSE dependencies built and configured successfully!")
+    print("=" * 60)
 
 
 def build_rabbit_binary(
@@ -154,6 +240,13 @@ def build_rabbit_binary(
     zigcxx_path: Path,
 ) -> Path:
     """Compile RabbitApp and link rabbit-opt."""
+    if not moose_dir.is_dir():
+        raise FileNotFoundError(
+            f"MOOSE directory {moose_dir} does not exist. "
+            "Run with --moose first."
+        )
+
+
     env = dict(os.environ)
     env["PATH"] = f"{repo_dir / '.venv' / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONNOUSERSITE"] = "1"
@@ -188,33 +281,56 @@ def build_rabbit_binary(
         omp_lib = str(repo_dir / "src" / "rabbit" / "lib" / "libomp.so")
 
     link_cmd = [
-        find_python_exe(), "-m", "ziglang", "c++",
-        "-target", "x86_64-linux-gnu",
+        find_python_exe(),
+        "-m",
+        "ziglang",
+        "c++",
+        "-target",
+        "x86_64-linux-gnu",
         "-O3",
         "-rdynamic",
         str(main_obj),
-        "-o", str(output_bin),
+        "-o",
+        str(output_bin),
         "-Wl,--no-as-needed",
         f"-L{repo_dir}/src/rabbit/lib",
-        f"-L{repo_dir}/lib/.libs", "-lrabbit-opt",
-        f"-L{moose_dir}/framework/.libs", "-lmoose-opt",
+        f"-L{repo_dir}/lib/.libs",
+        "-lrabbit-opt",
+        f"-L{moose_dir}/framework/.libs",
+        "-lmoose-opt",
         f"-L{moose_dir}/modules/solid_mechanics/lib/.libs",
         "-lsolid_mechanics-opt",
         f"-L{moose_dir}/modules/heat_transfer/lib/.libs",
         "-lheat_transfer-opt",
-        f"-L{moose_dir}/modules/contact/lib/.libs", "-lcontact-opt",
+        f"-L{moose_dir}/modules/contact/lib/.libs",
+        "-lcontact-opt",
         f"-L{moose_dir}/modules/shifted_boundary_method/lib/.libs",
         "-lshifted_boundary_method-opt",
-        f"-L{moose_dir}/modules/ray_tracing/lib/.libs", "-lray_tracing-opt",
+        f"-L{moose_dir}/modules/ray_tracing/lib/.libs",
+        "-lray_tracing-opt",
         f"-L{moose_dir}/modules/module_loader/lib/.libs",
         f"-L{wasp_dir}/lib",
-        "-lwaspcore", "-lwaspddi", "-lwaspexpr", "-lwasphalite",
-        "-lwasphit", "-lwasphive", "-lwaspjson", "-lwasplsp",
-        "-lwaspplot", "-lwaspsiren", "-lwaspson",
-        f"-L{moose_dir}/framework/contrib/hit/.libs", "-lhit-opt",
-        f"-L{libmesh_dir}/lib", "-lmesh_opt", "-ltimpi_opt",
-        f"-L{petsc_dir}/lib", "-lpetsc",
-        "-L/usr/lib/x86_64-linux-gnu/openmpi/lib", "-lmpi_cxx", "-lmpi",
+        "-lwaspcore",
+        "-lwaspddi",
+        "-lwaspexpr",
+        "-lwasphalite",
+        "-lwasphit",
+        "-lwasphive",
+        "-lwaspjson",
+        "-lwasplsp",
+        "-lwaspplot",
+        "-lwaspsiren",
+        "-lwaspson",
+        f"-L{moose_dir}/framework/contrib/hit/.libs",
+        "-lhit-opt",
+        f"-L{libmesh_dir}/lib",
+        "-lmesh_opt",
+        "-ltimpi_opt",
+        f"-L{petsc_dir}/lib",
+        "-lpetsc",
+        "-L/usr/lib/x86_64-linux-gnu/openmpi/lib",
+        "-lmpi_cxx",
+        "-lmpi",
         "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
     ]
     if omp_lib:
@@ -246,6 +362,34 @@ def find_needed_libraries(
     queue: list[Path] = [binary_path]
     visited_binaries: set[Path] = set()
 
+    system_prefixes = (
+        "libc.so",
+        "libm.so",
+        "libdl.so",
+        "libpthread.so",
+        "librt.so",
+        "libstdc++.so",
+        "libgcc_s.so",
+        "libmpi.so",
+        "libmpi_cxx.so",
+        "libopen-pal.so",
+        "libopen-rte.so",
+        "libhwloc.so",
+        "libevent",
+        "libz.so",
+        "libtirpc.so",
+        "libgfortran.so",
+        "libgomp.so",
+        "libudev.so",
+        "libkrb5",
+        "libk5crypto",
+        "libcom_err",
+        "libcap.so",
+        "libkeyutils",
+        "libresolv.so",
+        "libgssapi_krb5",
+    )
+
     while queue:
         current = queue.pop(0)
         if current in visited_binaries:
@@ -264,17 +408,7 @@ def find_needed_libraries(
                 if not match:
                     continue
                 soname = match.group(1)
-                if soname.startswith(("libc.so", "libm.so", "libdl.so",
-                                      "libpthread.so", "librt.so",
-                                      "libstdc++.so", "libgcc_s.so",
-                                      "libmpi.so", "libmpi_cxx.so",
-                                      "libopen-pal.so", "libopen-rte.so",
-                                      "libhwloc.so", "libevent",
-                                      "libz.so", "libtirpc.so",
-                                      "libgfortran.so", "libgomp.so",
-                                      "libudev.so", "libkrb5", "libk5crypto",
-                                      "libcom_err", "libcap.so", "libkeyutils",
-                                      "libresolv.so", "libgssapi_krb5")):
+                if soname.startswith(system_prefixes):
                     continue
 
                 if soname not in resolved_libs:
@@ -297,7 +431,6 @@ def stage_artifacts(
     bin_target_dir = repo_dir / "src" / "rabbit" / "bin"
     lib_target_dir = repo_dir / "src" / "rabbit" / "lib"
 
-    # Reset staging directories to remove obsolete / duplicate files
     if lib_target_dir.is_dir():
         shutil.rmtree(lib_target_dir)
     lib_target_dir.mkdir(parents=True, exist_ok=True)
@@ -307,7 +440,6 @@ def stage_artifacts(
     shutil.copy2(binary_path, dest_bin)
     dest_bin.chmod(0o755)
 
-    # Build lookup map of all available .so files in moose and rabbit repos
     available_libs: dict[str, Path] = {}
     for search_root in [repo_dir, moose_dir]:
         for p in search_root.rglob("*.so*"):
@@ -316,7 +448,6 @@ def stage_artifacts(
 
     resolved_libs = find_needed_libraries(binary_path, available_libs)
 
-    # Copy libomp if available
     omp_candidates = glob.glob("/opt/rocm-*/lib/llvm/lib-debug/libomp.so")
     if omp_candidates:
         resolved_libs["libomp.so"] = Path(omp_candidates[-1]).resolve()
@@ -325,28 +456,36 @@ def stage_artifacts(
         dest = lib_target_dir / soname
         shutil.copy2(real_path, dest)
 
-    # Strip debug symbols
     print("Stripping debug symbols from libraries and executable...")
     subprocess.run(["strip", "--strip-all", str(dest_bin)], check=False)
     for f in lib_target_dir.glob("*.so*"):
         if f.is_file():
             subprocess.run(["strip", "--strip-unneeded", str(f)], check=False)
 
-    # Patch RPATHs with patchelf
-    patchelf_bin = shutil.which("patchelf") or "patchelf"
+    patchelf_bin = "patchelf"
+    for cand in (
+        shutil.which("patchelf"),
+        Path(sys.prefix) / "bin" / "patchelf",
+        repo_dir / ".venv" / "bin" / "patchelf",
+    ):
+        if cand and Path(cand).is_file():
+            patchelf_bin = str(cand)
+            break
+
     rpath_app = "$ORIGIN/../lib:/usr/lib/x86_64-linux-gnu/openmpi/lib"
     rpath_lib = "$ORIGIN:/usr/lib/x86_64-linux-gnu/openmpi/lib"
 
     subprocess.run(
         [patchelf_bin, "--set-rpath", rpath_app, str(dest_bin)],
-        check=False,
+        check=True,
     )
     for f in lib_target_dir.glob("*.so*"):
         if f.is_file():
             subprocess.run(
                 [patchelf_bin, "--set-rpath", rpath_lib, str(f)],
-                check=False,
+                check=True,
             )
+
 
     print(
         f"Staged rabbit binary and {len(resolved_libs)} libraries "
@@ -354,21 +493,167 @@ def stage_artifacts(
     )
 
 
+def build_wheel(repo_dir: Path) -> Path:
+    """Build standalone Python wheel package and tag as manylinux."""
+    print("--> Building standalone wheel package...")
+    uv_bin = shutil.which("uv")
+    if uv_bin:
+        cmd = ["uv", "build", "--wheel"]
+    else:
+        cmd = [find_python_exe(), "-m", "build", "--wheel"]
+
+    subprocess.run(cmd, cwd=str(repo_dir), check=True)
+    dist_dir = repo_dir / "dist"
+    wheels = sorted(dist_dir.glob("*.whl"), key=os.path.getmtime)
+    if not wheels:
+        raise FileNotFoundError("No .whl package generated in dist/")
+    raw_whl = wheels[-1]
+
+    # Retag from py3-none-any to manylinux platform tag
+    if "none-any" in raw_whl.name:
+        platform_tag = (
+            "manylinux_2_35_x86_64.manylinux_2_38_x86_64.linux_x86_64"
+        )
+        print(f"--> Retagging wheel for Linux platform: {platform_tag}")
+        wheel_bin = shutil.which("wheel") or str(
+            repo_dir / ".venv" / "bin" / "wheel"
+        )
+        subprocess.run(
+            [
+                wheel_bin,
+                "tags",
+                f"--platform-tag={platform_tag}",
+                "--remove",
+                str(raw_whl),
+            ],
+            check=True,
+        )
+        wheels = sorted(dist_dir.glob("*.whl"), key=os.path.getmtime)
+        latest_whl = wheels[-1]
+    else:
+        latest_whl = raw_whl
+
+    size_mb = latest_whl.stat().st_size / (1024 * 1024)
+    print(f"Wheel package ready: {latest_whl.name} ({size_mb:.2f} MB)")
+    return latest_whl
+
+
+
+def run_tests(repo_dir: Path) -> None:
+    """Run pytest suite against staged package."""
+    print("--> Running pytest suite...")
+    subprocess.run(
+        [find_python_exe(), "-m", "pytest", "test/test_simulations.py", "-v"],
+        cwd=str(repo_dir),
+        check=True,
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line flags for build_rabbit."""
+    parser = argparse.ArgumentParser(
+        description="Unified build orchestrator for rabbit-fem."
+    )
+    parser.add_argument(
+        "--moose",
+        nargs="?",
+        const="default",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Clone and build upstream MOOSE dependencies "
+            "(PETSc, libMesh, WASP). Optionally provide path to MOOSE."
+        ),
+    )
+    parser.add_argument(
+        "--setup-wrappers",
+        action="store_true",
+        help="Generate only the zig cc wrapper toolchain scripts.",
+    )
+    parser.add_argument(
+        "--wheel",
+        action="store_true",
+        help=(
+            "Build the standalone Python wheel package in dist/ "
+            "after staging."
+        ),
+    )
+    parser.add_argument(
+        "--wheel-only",
+        action="store_true",
+        help=(
+            "Package existing staged artifacts into dist/*.whl "
+            "without recompiling."
+        ),
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Run pytest simulation and relocatability test suite.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help=(
+            "Execute full pipeline: MOOSE setup, rabbit build, "
+            "staging, wheel, and tests."
+        ),
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
     """Main build orchestration entry point."""
-    repo_dir = Path(__file__).resolve().parent.parent
-    zigcc_path, zigcxx_path = setup_zig_wrappers(repo_dir)
+    args = parse_args()
+    repo_dir = Path(__file__).resolve().parent
 
-    if "--setup-wrappers" in sys.argv:
+
+    # If only wheel packaging of existing staged artifacts was requested
+    if args.wheel_only:
+        build_wheel(repo_dir)
+        if args.test:
+            run_tests(repo_dir)
+        return
+
+    # If only tests requested
+    if args.test and not (args.moose or args.wheel or args.all):
+        run_tests(repo_dir)
+        return
+
+    # 1. Generate toolchain wrappers
+    zigcc_path, zigcxx_path = setup_zig_wrappers(repo_dir)
+    if args.setup_wrappers:
         print(f"Generated Zig CC wrappers at {zigcc_path.parent}")
         return
 
-    moose_dir = get_moose_dir(repo_dir)
+    # Determine custom MOOSE path if passed
+    custom_moose = None
+    if args.moose and args.moose != "default":
+        custom_moose = args.moose
+    moose_dir = get_moose_dir(repo_dir, custom_moose)
+
+    # 2. If --moose or --all requested, build MOOSE dependencies
+    if args.moose is not None or args.all:
+        build_moose_dependencies(moose_dir)
+        if args.moose is not None and not args.all and not args.wheel:
+            return
+
+    # 3. Build and Stage Rabbit
     binary_path = build_rabbit_binary(
         repo_dir, moose_dir, zigcc_path, zigcxx_path
     )
     stage_artifacts(repo_dir, moose_dir, binary_path)
-    print("Rabbit build and staging completed successfully.")
+
+    # 4. Build wheel package if requested
+    if args.wheel or args.all:
+        build_wheel(repo_dir)
+
+    # 5. Run test suite if requested
+    if args.test or args.all:
+        run_tests(repo_dir)
+
+    print("Rabbit build pipeline completed successfully.")
+
 
 
 if __name__ == "__main__":

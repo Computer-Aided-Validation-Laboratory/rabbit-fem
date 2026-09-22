@@ -1,3 +1,13 @@
+// --------------------------------------------------------------------------------------
+// Rabbit: A lightweight MOOSE distribution for thermo-mechanical simulation
+//
+// Copyright (c) 2026 scepticalrabbit (Lloyd Fletcher)
+// Licensed under the GNU Lesser General Public License v2.1
+// See LICENSE for details.
+//
+// Authors: scepticalrabbit (Lloyd Fletcher)
+// --------------------------------------------------------------------------------------
+
 const std = @import("std");
 
 pub fn build(builder: *std.Build) void {
@@ -10,8 +20,9 @@ pub fn build(builder: *std.Build) void {
         "uv",
         "run",
         "python",
-        "scripts/build_rabbit.py",
+        "build_rabbit.py",
     });
+
 
     const run_build_step = builder.step(
         "build_app",

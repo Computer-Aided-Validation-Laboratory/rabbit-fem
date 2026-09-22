@@ -1,21 +1,44 @@
+# ------------------------------------------------------------------------------
+# Rabbit: A lightweight MOOSE distribution for thermo-mechanical simulation
+#
+# Copyright (c) 2026 scepticalrabbit (Lloyd Fletcher)
+# Licensed under the GNU Lesser General Public License v2.1
+# See LICENSE for details.
+#
+# Authors: scepticalrabbit (Lloyd Fletcher)
+# ------------------------------------------------------------------------------
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "rabbit-fem"
-version = "0.1.0"
+version = "2026.9.0"
 description = "Lightweight MOOSE distribution packaging thermal and solid mechanics"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "LGPL-2.1"
 authors = [
-    { name = "Rabbit Contributors" },
+    { name = "scepticalrabbit (Lloyd Fletcher)" },
 ]
 dependencies = [
     "ziglang>=0.16.0",
     "patchelf>=0.17",
+    "gmsh>=4.13.0",
+    "jinja2>=3.0.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "twine>=5.0.0",
+    "wheel>=0.40.0",
+]
+test = [
+    "pytest>=8.0.0",
+]
+
 
 [project.scripts]
 rabbit = "rabbit.cli:main"
@@ -32,8 +55,10 @@ include = [
     "/src",
     "/include",
     "/scripts",
+    "/build_rabbit.py",
     "/Makefile",
     "/build.zig",
     "/README.md",
     "/LICENSE",
 ]
+
