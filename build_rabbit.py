@@ -1,4 +1,4 @@
-# ------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Rabbit: A lightweight MOOSE distribution for thermo-mechanical simulation
 #
 # Copyright (c) 2026 scepticalrabbit (Lloyd Fletcher)
@@ -6,7 +6,7 @@
 # See LICENSE for details.
 #
 # Authors: scepticalrabbit (Lloyd Fletcher)
-# ------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 """Build and package the rabbit MOOSE distribution.
 
@@ -66,69 +66,114 @@ def detect_system_include_flags(wrapper_dir: Path) -> list[str]:
 
 
 def setup_zig_wrappers(repo_dir: Path) -> tuple[Path, Path]:
-    """Create wrapper scripts for zig cc using ziglang without libcxx."""
+    """Create wrapper scripts for zig cc / clang toolchain."""
     wrapper_dir = repo_dir / ".zig_wrappers"
     wrapper_dir.mkdir(parents=True, exist_ok=True)
-
-    py_exe = find_python_exe()
-    inc_flags = " ".join(detect_system_include_flags(wrapper_dir))
-    warn_flags = (
-        "-Wno-date-time -Wno-error=date-time "
-        "-Wno-ignored-attributes -Wno-unused-command-line-argument "
-        "-fno-sanitize=all"
-    )
 
     zigcc_path = wrapper_dir / "zigcc"
     zigcxx_path = wrapper_dir / "zigcxx"
 
-    cc_template = (
-        "#!/bin/bash\n"
-        "extra_link=\"\"\n"
-        "filtered_args=()\n"
-        "for arg in \"$@\"; do\n"
-        "    if [ \"$arg\" = \"-shared\" ]; then\n"
-        "        extra_link=\"-nostartfiles\"\n"
-        "    fi\n"
-        "    if [ \"$arg\" != \"-lstdc++\" ] && "
-        "[ \"$arg\" != \"-lstdc++fs\" ]; then\n"
-        "        filtered_args+=(\"$arg\")\n"
-        "    fi\n"
-        "done\n"
-        f"exec {py_exe} -m ziglang cc -stdlib=libstdc++ {inc_flags} "
-        "\"${filtered_args[@]}\" $extra_link -Wl,--allow-shlib-undefined "
-        f"{warn_flags}\n"
-    )
+    clang_candidates = (
+        [shutil.which("clang")] if shutil.which("clang") else []
+    ) + sorted(glob.glob("/opt/rocm-*/lib/llvm/bin/clang"))
+    clangxx_candidates = (
+        [shutil.which("clang++")] if shutil.which("clang++") else []
+    ) + sorted(glob.glob("/opt/rocm-*/lib/llvm/bin/clang++"))
 
-    cxx_template = (
-        "#!/bin/bash\n"
-        "is_compile=0\n"
-        "extra_link=\"\"\n"
-        "filtered_args=()\n"
-        "for arg in \"$@\"; do\n"
-        "    if [ \"$arg\" = \"-c\" ] || [ \"$arg\" = \"-E\" ] || "
-        "[ \"$arg\" = \"-S\" ]; then\n"
-        "        is_compile=1\n"
-        "    fi\n"
-        "    if [ \"$arg\" = \"-shared\" ]; then\n"
-        "        extra_link=\"-nostartfiles\"\n"
-        "    fi\n"
-        "    if [ \"$arg\" != \"-lstdc++\" ] && "
-        "[ \"$arg\" != \"-lstdc++fs\" ]; then\n"
-        "        filtered_args+=(\"$arg\")\n"
-        "    fi\n"
-        "done\n"
-        "if [ \"$is_compile\" -eq 1 ]; then\n"
-        f"    exec {py_exe} -m ziglang cc -stdlib=libstdc++ {inc_flags} "
-        "\"${filtered_args[@]}\" "
-        f"{warn_flags}\n"
-        "else\n"
-        f"    exec {py_exe} -m ziglang cc -stdlib=libstdc++ {inc_flags} "
-        "\"${filtered_args[@]}\" $extra_link "
-        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6 "
-        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1 "
-        f"-Wl,--allow-shlib-undefined {warn_flags}\n"
-        "fi\n"
-    )
+    if clang_candidates and clangxx_candidates:
+        c_compiler = clang_candidates[0]
+        cxx_compiler = clangxx_candidates[0]
+        cc_template = (
+            "#!/bin/bash\n"
+            f"exec {c_compiler} \"$@\"\n"
+        )
+        cxx_template = (
+            "#!/bin/bash\n"
+            f"exec {cxx_compiler} \"$@\"\n"
+        )
+    else:
+        py_exe = find_python_exe()
+        inc_flags = " ".join(detect_system_include_flags(wrapper_dir))
+        warn_flags = (
+            "-Wno-date-time -Wno-error=date-time "
+            "-Wno-ignored-attributes -Wno-unused-command-line-argument "
+            "-fno-sanitize=all"
+        )
+        omp_candidates = (
+            glob.glob("/opt/rocm-*/lib/llvm/lib/libomp.so")
+            + glob.glob("/opt/rocm-*/lib/llvm/lib-debug/libomp.so")
+            + glob.glob("/usr/lib/llvm-*/lib/libomp.so")
+        )
+        omp_link_flag = (
+            f"-x none {omp_candidates[0]}" if omp_candidates else ""
+        )
+
+        cc_template = (
+            "#!/bin/bash\n"
+            "is_compile=0\n"
+            "extra_link=\"\"\n"
+            "filtered_args=()\n"
+            "for arg in \"$@\"; do\n"
+            "    if [ \"$arg\" = \"-c\" ] || [ \"$arg\" = \"-E\" ] || "
+            "[ \"$arg\" = \"-S\" ]; then\n"
+            "        is_compile=1\n"
+            "    fi\n"
+            "    if [ \"$arg\" = \"-shared\" ]; then\n"
+            "        extra_link=\"-nostartfiles\"\n"
+            "    fi\n"
+            "    if [ \"$arg\" != \"-lstdc++\" ] && "
+            "[ \"$arg\" != \"-lstdc++fs\" ]; then\n"
+            "        filtered_args+=(\"$arg\")\n"
+            "    fi\n"
+            "done\n"
+            "if [ \"$is_compile\" -eq 1 ]; then\n"
+            f"    exec {py_exe} -m ziglang cc -stdlib=libstdc++ "
+            f"{inc_flags} "
+            "\"${filtered_args[@]}\" "
+            f"{warn_flags}\n"
+            "else\n"
+            f"    exec {py_exe} -m ziglang cc -stdlib=libstdc++ "
+            f"{inc_flags} "
+            + '"${filtered_args[@]}" $extra_link '
+            + f"{omp_link_flag} "
+            "-Wl,--allow-shlib-undefined "
+            f"{warn_flags}\n"
+            "fi\n"
+        )
+
+        cxx_template = (
+            "#!/bin/bash\n"
+            "is_compile=0\n"
+            "extra_link=\"\"\n"
+            "filtered_args=()\n"
+            "for arg in \"$@\"; do\n"
+            "    if [ \"$arg\" = \"-c\" ] || [ \"$arg\" = \"-E\" ] || "
+            "[ \"$arg\" = \"-S\" ]; then\n"
+            "        is_compile=1\n"
+            "    fi\n"
+            "    if [ \"$arg\" = \"-shared\" ]; then\n"
+            "        extra_link=\"-nostartfiles\"\n"
+            "    fi\n"
+            "    if [ \"$arg\" != \"-lstdc++\" ] && "
+            "[ \"$arg\" != \"-lstdc++fs\" ]; then\n"
+            "        filtered_args+=(\"$arg\")\n"
+            "    fi\n"
+            "done\n"
+            "if [ \"$is_compile\" -eq 1 ]; then\n"
+            f"    exec {py_exe} -m ziglang cc -stdlib=libstdc++ "
+            f"{inc_flags} "
+            "\"${filtered_args[@]}\" "
+            f"{warn_flags}\n"
+            "else\n"
+            f"    exec {py_exe} -m ziglang cc -stdlib=libstdc++ "
+            f"{inc_flags} "
+            + '"${filtered_args[@]}" $extra_link -x none '
+            + "/usr/lib/x86_64-linux-gnu/libstdc++.so.6 "
+            "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1 "
+            f"{omp_link_flag} "
+            f"-Wl,--allow-shlib-undefined {warn_flags}\n"
+            "fi\n"
+        )
 
     zigcc_path.write_text(cc_template)
     zigcxx_path.write_text(cxx_template)
@@ -137,6 +182,7 @@ def setup_zig_wrappers(repo_dir: Path) -> tuple[Path, Path]:
     zigcxx_path.chmod(0o755)
 
     return zigcc_path, zigcxx_path
+
 
 
 def get_moose_dir(
@@ -158,7 +204,11 @@ def get_moose_dir(
 
 
 
-def build_moose_dependencies(moose_dir: Path) -> None:
+def build_moose_dependencies(
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
     """Clone upstream MOOSE (if missing) and compile PETSc, libMesh, WASP."""
     jobs = os.environ.get("MOOSE_JOBS", str(os.cpu_count() or 4))
     print("=" * 60)
@@ -180,6 +230,40 @@ def build_moose_dependencies(moose_dir: Path) -> None:
     else:
         print(f"MOOSE repository found at {moose_dir}")
 
+    # Check and initialize submodules if not checked out
+    petsc_cfg = moose_dir / "petsc" / "configure"
+    if not petsc_cfg.is_file():
+        print("Initializing MOOSE git submodules (petsc, libmesh, wasp)...")
+        subprocess.run(
+            [
+                "git",
+                "submodule",
+                "update",
+                "--init",
+                "petsc",
+                "libmesh",
+                "framework/contrib/wasp",
+                "framework/contrib/hit",
+            ],
+            cwd=str(moose_dir),
+            check=True,
+        )
+
+    tool_env = dict(os.environ)
+    tool_env["OMPI_CC"] = str(zigcc_path)
+    tool_env["OMPI_CXX"] = str(zigcxx_path)
+    tool_env["CC"] = "mpicc"
+    tool_env["CXX"] = "mpicxx"
+    tool_env["CMAKE_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu"
+    tool_env["CMAKE_PREFIX_PATH"] = (
+        "/usr/lib/x86_64-linux-gnu:"
+        + os.environ.get("CMAKE_PREFIX_PATH", "")
+    )
+    tool_env["LIBRARY_PATH"] = (
+        "/usr/lib/x86_64-linux-gnu:"
+        + os.environ.get("LIBRARY_PATH", "")
+    )
+
     # 1. Build PETSc
     print("--> Building PETSc...")
     petsc_env = dict(os.environ)
@@ -199,12 +283,13 @@ def build_moose_dependencies(moose_dir: Path) -> None:
     )
 
     # 2. Build libMesh
-    print("--> Building libMesh...")
-    libmesh_env = dict(os.environ)
+    print("--> Building libMesh with Zig toolchain...")
+    libmesh_env = dict(tool_env)
     libmesh_env["METHODS"] = "opt"
     subprocess.run(
         [
             "./scripts/update_and_rebuild_libmesh.sh",
+            "--skip-submodule-update",
             "--with-mpi",
         ],
         cwd=str(moose_dir),
@@ -217,6 +302,7 @@ def build_moose_dependencies(moose_dir: Path) -> None:
     subprocess.run(
         ["./scripts/update_and_rebuild_wasp.sh"],
         cwd=str(moose_dir),
+        env=tool_env,
         check=True,
     )
 
@@ -225,12 +311,14 @@ def build_moose_dependencies(moose_dir: Path) -> None:
     subprocess.run(
         ["./configure", "--with-derivative-size=89"],
         cwd=str(moose_dir),
+        env=tool_env,
         check=True,
     )
 
     print("=" * 60)
     print(" MOOSE dependencies built and configured successfully!")
     print("=" * 60)
+
 
 
 def build_rabbit_binary(
@@ -245,7 +333,6 @@ def build_rabbit_binary(
             f"MOOSE directory {moose_dir} does not exist. "
             "Run with --moose first."
         )
-
 
     env = dict(os.environ)
     env["PATH"] = f"{repo_dir / '.venv' / 'bin'}:{env.get('PATH', '')}"
@@ -263,89 +350,7 @@ def build_rabbit_binary(
     print(f"Building RabbitApp with MOOSE_DIR={moose_dir} ({jobs} jobs)...")
     subprocess.run(cmd, cwd=str(repo_dir), env=env, check=True)
 
-    main_obj = repo_dir / "src" / ".libs" / "main.x86_64-pc-linux-gnu.opt.o"
-    if not main_obj.is_file():
-        main_obj = repo_dir / "src" / "main.x86_64-pc-linux-gnu.opt.o"
-
-    libmesh_dir = moose_dir / "libmesh" / "installed"
-    petsc_dir = moose_dir / "petsc" / "arch-moose"
-    wasp_dir = moose_dir / "framework" / "contrib" / "wasp" / "install"
-
     output_bin = repo_dir / "rabbit-opt"
-
-    omp_lib = ""
-    omp_candidates = glob.glob("/opt/rocm-*/lib/llvm/lib-debug/libomp.so")
-    if omp_candidates:
-        omp_lib = omp_candidates[-1]
-    elif (repo_dir / "src" / "rabbit" / "lib" / "libomp.so").is_file():
-        omp_lib = str(repo_dir / "src" / "rabbit" / "lib" / "libomp.so")
-
-    link_cmd = [
-        find_python_exe(),
-        "-m",
-        "ziglang",
-        "c++",
-        "-target",
-        "x86_64-linux-gnu",
-        "-O3",
-        "-rdynamic",
-        str(main_obj),
-        "-o",
-        str(output_bin),
-        "-Wl,--no-as-needed",
-        f"-L{repo_dir}/src/rabbit/lib",
-        f"-L{repo_dir}/lib/.libs",
-        "-lrabbit-opt",
-        f"-L{moose_dir}/framework/.libs",
-        "-lmoose-opt",
-        f"-L{moose_dir}/modules/solid_mechanics/lib/.libs",
-        "-lsolid_mechanics-opt",
-        f"-L{moose_dir}/modules/heat_transfer/lib/.libs",
-        "-lheat_transfer-opt",
-        f"-L{moose_dir}/modules/contact/lib/.libs",
-        "-lcontact-opt",
-        f"-L{moose_dir}/modules/shifted_boundary_method/lib/.libs",
-        "-lshifted_boundary_method-opt",
-        f"-L{moose_dir}/modules/ray_tracing/lib/.libs",
-        "-lray_tracing-opt",
-        f"-L{moose_dir}/modules/module_loader/lib/.libs",
-        f"-L{wasp_dir}/lib",
-        "-lwaspcore",
-        "-lwaspddi",
-        "-lwaspexpr",
-        "-lwasphalite",
-        "-lwasphit",
-        "-lwasphive",
-        "-lwaspjson",
-        "-lwasplsp",
-        "-lwaspplot",
-        "-lwaspsiren",
-        "-lwaspson",
-        f"-L{moose_dir}/framework/contrib/hit/.libs",
-        "-lhit-opt",
-        f"-L{libmesh_dir}/lib",
-        "-lmesh_opt",
-        "-ltimpi_opt",
-        f"-L{petsc_dir}/lib",
-        "-lpetsc",
-        "-L/usr/lib/x86_64-linux-gnu/openmpi/lib",
-        "-lmpi_cxx",
-        "-lmpi",
-        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
-    ]
-    if omp_lib:
-        link_cmd.append(omp_lib)
-
-    link_cmd.extend([
-        "-Wl,--as-needed",
-        "-Wl,--allow-shlib-undefined",
-        "-Wl,-rpath,$ORIGIN/../lib",
-        "-Wl,-rpath,/usr/lib/x86_64-linux-gnu/openmpi/lib",
-    ])
-
-    print("Linking rabbit-opt executable with zig toolchain...")
-    subprocess.run(link_cmd, check=True)
-
     if not output_bin.is_file():
         raise FileNotFoundError(
             f"Expected binary {output_bin} was not built."
@@ -634,9 +639,10 @@ def main() -> None:
 
     # 2. If --moose or --all requested, build MOOSE dependencies
     if args.moose is not None or args.all:
-        build_moose_dependencies(moose_dir)
+        build_moose_dependencies(moose_dir, zigcc_path, zigcxx_path)
         if args.moose is not None and not args.all and not args.wheel:
             return
+
 
     # 3. Build and Stage Rabbit
     binary_path = build_rabbit_binary(
