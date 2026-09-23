@@ -194,6 +194,10 @@ if (-not (Test-Path $LibMeshLib)) {
     $patchNetcdf = "cd moose/libmesh/contrib/netcdf/netcdf-c-4.6.2 && sed -i 's/#include <assert.h>/#include <assert.h>\n#include <errno.h>/' libdispatch/dwinpath.c && sed -i 's/#ifdef _MSC_VER/#if defined(_MSC_VER) || defined(_WIN32)/g' libdispatch/dwinpath.c && sed -i 's/path = realpath(relpath, NULL);/path = _fullpath(NULL,relpath,8192);/' libdispatch/dwinpath.c && sed -i 's/#ifdef _MSC_VER/#if defined(_MSC_VER) || defined(_WIN32)/g' libsrc/memio.c"
     Invoke-MsysBash $patchNetcdf "Patching NetCDF dwinpath.c and memio.c for MinGW"
 
+    # Patch METIS GKlib for MinGW (sys/resource.h, regex.h, __argv macro collision)
+    $patchMetis = "cd moose/libmesh/contrib/metis/GKlib && sed -i 's/#include <sys\/resource.h>/#if !defined(_WIN32) \&\& !defined(__MINGW32__)\n  #include <sys\/resource.h>\n#endif/' gk_arch.h && sed -i 's/#if defined(USE_GKREGEX)/#if defined(USE_GKREGEX) || defined(_WIN32) || defined(__MINGW32__)/' GKlib.h && sed -i 's/__argc/argc/g; s/__argv/argv/g; s/__shortopts/shortopts/g; s/__longopts/longopts/g; s/__longind/longind/g' gk_getopt.h"
+    Invoke-MsysBash $patchMetis "Patching METIS GKlib for MinGW"
+
     $libmeshBuild = "cd moose/libmesh && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --with-petsc=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
     Invoke-MsysBash $libmeshBuild "Configuring and building libMesh"
 } else {
