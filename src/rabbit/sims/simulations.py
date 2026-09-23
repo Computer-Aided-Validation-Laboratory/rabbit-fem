@@ -15,6 +15,7 @@ from importlib.resources import files
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 
 class EDims(Enum):
@@ -381,6 +382,9 @@ def run_rabbit(
         )
 
     cmd = [str(bin_path), "-i", str(input_path)]
+    if sys.platform == "win32":
+        if not extra_args or not any("-pc_type" in arg for arg in extra_args):
+            cmd.extend(["-pc_type", "ilu"])
     if extra_args:
         cmd.extend(extra_args)
 

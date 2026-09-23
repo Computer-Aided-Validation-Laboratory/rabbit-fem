@@ -1,8 +1,21 @@
+# Windows build artifacts
+*.exe
+*.pdb
+*.obj
+*.lib
+*.dll
+*.ilk
+*.exp
+*.manifest
+rabbit-*.exe
+rabbit-*.pdb
+
 # Project specific ignores
 temp/
 plans/
 refs/
 .*/
+!.github/
 
 # MOOSE and Rabbit build artifacts
 moose/
@@ -12,6 +25,7 @@ rabbit-dbg
 null.o
 src/rabbit/bin/
 src/rabbit/lib/
+!src/rabbit/lib/.gitkeep
 
 .zig_wrappers/
 .zig-cache/

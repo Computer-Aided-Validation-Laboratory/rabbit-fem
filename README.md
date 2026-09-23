@@ -93,9 +93,77 @@ uv run python src/rabbit/examples/ex1_dogbone.py
 
 ## Build from Source
 
-Building `rabbit-fem` is managed through a single orchestrator script: [`build_rabbit.py`](file:///home/lloydf/rabbit-fem/build_rabbit.py).
+`rabbit-fem` can be built from source on both **Linux** (Ubuntu 22.04+ or compatible) and **native Windows** (x86_64).
 
-### Prerequisites
+---
+
+### Windows Build & Testing
+
+#### Prerequisites (Windows)
+
+1. **Python 3.10+** (with [`uv`](https://docs.astral.sh/uv/)):
+   ```powershell
+   winget install astral-sh.uv
+   ```
+2. **Git Long Paths**:
+   ```powershell
+   git config --global core.longpaths true
+   ```
+3. **MSYS2** (used strictly for Unix shell utilities and GNU Make needed by PETSc/libMesh/MOOSE configure and build scripts; compilation itself is handled by Zig):
+   ```powershell
+   winget install --id MSYS2.MSYS2 --source winget
+   C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make diffutils patch python m4
+   ```
+
+#### 1-Step Automated Windows Build
+
+Run the automated PowerShell build script from the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1
+```
+
+This script:
+- Creates and sets up `.venv` with `uv`.
+- Installs Python dependencies (`ziglang==0.16.0`, `packaging`, `pyyaml`, `jinja2`, `pytest`, `gmsh`).
+- Configures and builds **PETSc**, **libMesh**, **WASP**, and the **MOOSE** framework using the Zig C/C++ compiler.
+- Compiles and links `rabbit-opt.exe` with Heat Transfer, Solid Mechanics, Contact, Ray Tracing, and Shifted Boundary Method.
+- Stages `rabbit.exe` into `src/rabbit/bin/` and executes the simulation test suite.
+
+#### Running Tests on Windows
+
+Once the environment and binary are built, you can run the test suite in several ways:
+
+1. **Using `uv run`** (Recommended):
+   ```powershell
+   uv run pytest test/test_simulations.py -v
+   ```
+   or using the build script:
+   ```powershell
+   uv run python build_rabbit.py --test
+   ```
+
+2. **Using `.venv` directly**:
+   ```powershell
+   $env:PYTHONPATH = "src"
+   .\.venv\Scripts\python.exe -m pytest test/test_simulations.py -v
+   ```
+
+#### Building the Standalone Windows Wheel
+
+To package the staged executable into a distributable wheel:
+
+```powershell
+uv run python build_rabbit.py --wheel-only --test
+```
+
+This generates `dist/rabbit_fem-2026.9.0-py3-none-win_amd64.whl` (~56 MB, fully self-contained).
+
+---
+
+### Linux Build & Testing
+
+#### Prerequisites (Linux)
 
 - **OS**: Linux x86_64 (Ubuntu 22.04+ or compatible)
 - **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`
@@ -111,9 +179,7 @@ source .venv/bin/activate
 uv pip install -e ".[dev]"
 ```
 
----
-
-### The 2-Step Build Flow
+#### The 2-Step Build Flow (Linux)
 
 ```mermaid
 flowchart LR
@@ -126,7 +192,7 @@ flowchart LR
     Step1 --> Step2
 ```
 
-#### Step 1: Upstream MOOSE Dependencies (One-Time Setup)
+##### Step 1: Upstream MOOSE Dependencies (One-Time Setup)
 
 Clones upstream MOOSE (if needed), compiles PETSc, libMesh, and WASP, and configures MOOSE:
 
@@ -135,7 +201,7 @@ uv run python build_rabbit.py --moose
 ```
 *(Optionally pass a custom path: `--moose /path/to/moose`)*
 
-#### Step 2: Build Rabbit, Stage Artifacts & Package Wheel
+##### Step 2: Build Rabbit, Stage Artifacts & Package Wheel
 
 Compiles RabbitApp with the Zig toolchain, strips symbols, rewrites RPATHs with `patchelf`, packages the `.whl` into `dist/`, and runs tests:
 
@@ -153,7 +219,7 @@ uv run python build_rabbit.py --wheel --test
 | `uv run python build_rabbit.py` | Compile Rabbit and stage relocatable binaries in `src/rabbit/` |
 | `uv run python build_rabbit.py --wheel` | Compile Rabbit, stage artifacts, and build wheel in `dist/` |
 | `uv run python build_rabbit.py --wheel-only` | Package existing staged artifacts into `dist/*.whl` without recompiling |
-| `uv run python build_rabbit.py --test` | Run pytest simulation and binary relocatability test suite |
+| `uv run python build_rabbit.py --test` | Run pytest simulation and relocatability test suite (alias: `--tests`) |
 | `uv run python build_rabbit.py --all` | Full pipeline: MOOSE build, Rabbit build, staging, wheel, and tests |
 
 Alternatively, you can trigger the build using the Zig build system:

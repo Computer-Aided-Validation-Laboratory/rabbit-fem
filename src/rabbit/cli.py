@@ -11,6 +11,7 @@
 """Command-line interface wrapper for rabbit MOOSE binary."""
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,7 +19,11 @@ from pathlib import Path
 def get_binary_path() -> Path:
     """Locate the packaged rabbit binary."""
     base_dir = Path(__file__).resolve().parent
+    exe_suffix = ".exe" if sys.platform == "win32" else ""
     candidates = [
+        base_dir / "bin" / f"rabbit{exe_suffix}",
+        base_dir / "bin" / f"rabbit-opt{exe_suffix}",
+        base_dir.parent.parent / f"rabbit-opt{exe_suffix}",
         base_dir / "bin" / "rabbit",
         base_dir / "bin" / "rabbit-opt",
         base_dir.parent.parent / "rabbit-opt",
@@ -42,17 +47,22 @@ def format_cli_args(raw_args: list[str]) -> list[str]:
     """Normalize CLI arguments, adding -i if a .i file is passed directly."""
     has_input_flag = any(arg in ("-i", "--input") for arg in raw_args)
     if has_input_flag:
-        return raw_args
+        formatted = list(raw_args)
+    else:
+        formatted = []
+        input_handled = False
+        for arg in raw_args:
+            is_input = not arg.startswith("-") and arg.endswith(".i")
+            if not input_handled and is_input:
+                formatted.extend(["-i", arg])
+                input_handled = True
+            else:
+                formatted.append(arg)
 
-    formatted: list[str] = []
-    input_handled = False
-    for arg in raw_args:
-        is_input = not arg.startswith("-") and arg.endswith(".i")
-        if not input_handled and is_input:
-            formatted.extend(["-i", arg])
-            input_handled = True
-        else:
-            formatted.append(arg)
+    info_flags = ("-h", "--help", "-v", "--version", "--docs", "--show-capabilities", "--registry")
+    if sys.platform == "win32" and not any(arg in info_flags for arg in raw_args) and not any("-pc_type" in arg for arg in formatted):
+        formatted.extend(["-pc_type", "ilu"])
+
     return formatted
 
 
@@ -76,7 +86,11 @@ def main() -> None:
     processed_args = format_cli_args(sys.argv[1:])
     args = [str(bin_path)] + processed_args
     try:
-        os.execvpe(str(bin_path), args, env)
+        if sys.platform == "win32":
+            res = subprocess.run(args, env=env)
+            sys.exit(res.returncode)
+        else:
+            os.execvpe(str(bin_path), args, env)
     except OSError as err:
         sys.stderr.write(f"Failed to execute rabbit binary: {err}\n")
         sys.exit(1)

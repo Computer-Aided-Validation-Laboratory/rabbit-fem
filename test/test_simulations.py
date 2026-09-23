@@ -11,6 +11,7 @@
 """Integration test suite for Rabbit simulations and Gmsh workflow."""
 
 from pathlib import Path
+import sys
 import pytest
 
 from rabbit.sims import (
@@ -142,57 +143,164 @@ def test_gmsh_to_moose_hole2d(tmp_path: Path) -> None:
     assert exodus_files[0].stat().st_size > 0
 
 
-def test_binary_and_library_relocatability() -> None:
-    """Verify that binary and shared libs contain no hardcoded host paths."""
+def test_binary_and_library_relocatability(tmp_path: Path) -> None:
+    """Verify that binary and shared libs contain no hardcoded host paths and run relocated."""
     import os
+    import shutil
+    import struct
     import subprocess
     from rabbit.cli import get_binary_path, get_library_dir
+    from rabbit.sims import cube_thermomech_input_path, EElemType
 
     rabbit_bin = get_binary_path()
     lib_dir = get_library_dir()
 
-    def _get_rpath(elf_path: Path) -> str:
-        res = subprocess.check_output(
-            ["readelf", "-d", str(elf_path)], text=True
+    if sys.platform == "win32":
+        # 1. Audit PE Import Directory: zero compiler or MSYS2 DLL dependencies
+        def _get_pe_imported_dlls(exe_path: Path) -> list[str]:
+            with open(exe_path, "rb") as f:
+                dos = f.read(64)
+                if len(dos) < 64 or dos[:2] != b"MZ":
+                    return []
+                pe_offset = struct.unpack("<I", dos[60:64])[0]
+                f.seek(pe_offset)
+                if f.read(4) != b"PE\x00\x00":
+                    return []
+                f.seek(pe_offset + 4 + 20)
+                is_64 = struct.unpack("<H", f.read(2))[0] == 0x20B
+                import_rva_offset = pe_offset + 24 + (120 if is_64 else 104)
+                f.seek(import_rva_offset)
+                import_rva, _ = struct.unpack("<II", f.read(8))
+                if not import_rva:
+                    return []
+
+                f.seek(pe_offset + 4 + 2)
+                num_sections = struct.unpack("<H", f.read(2))[0]
+                f.seek(pe_offset + 4 + 16)
+                opt_header_size = struct.unpack("<H", f.read(2))[0]
+                sections = []
+                f.seek(pe_offset + 24 + opt_header_size)
+                for _ in range(num_sections):
+                    sec = f.read(40)
+                    vsize, vaddr, rsize, raddr = struct.unpack("<IIII", sec[8:24])
+                    sections.append((vaddr, vsize, raddr, rsize))
+
+                def _rva_to_offset(rva: int) -> int | None:
+                    for vaddr, vsize, raddr, _ in sections:
+                        if vaddr <= rva < vaddr + vsize:
+                            return raddr + (rva - vaddr)
+                    return None
+
+                import_offset = _rva_to_offset(import_rva)
+                dlls = []
+                if import_offset:
+                    f.seek(import_offset)
+                    while True:
+                        desc = f.read(20)
+                        if len(desc) < 20 or desc == b"\x00" * 20:
+                            break
+                        _, _, _, name_rva, _ = struct.unpack("<IIIII", desc)
+                        name_offset = _rva_to_offset(name_rva)
+                        if name_offset:
+                            cur = f.tell()
+                            f.seek(name_offset)
+                            dll_name = b""
+                            while True:
+                                ch = f.read(1)
+                                if ch in (b"\x00", b""):
+                                    break
+                                dll_name += ch
+                            dlls.append(dll_name.decode("utf-8", errors="ignore"))
+                            f.seek(cur)
+                return dlls
+
+        dlls = _get_pe_imported_dlls(rabbit_bin)
+        assert dlls, "No PE imports found in rabbit binary"
+        forbidden_substrings = (
+            "msys", "cygwin", "mingw", "libgcc", "libstdc", "libwinpthread", "libgfortran"
         )
-        rpaths: list[str] = []
-        for line in res.splitlines():
-            if "(RUNPATH)" in line or "(RPATH)" in line:
-                rpaths.append(line.split("[")[1].split("]")[0])
-        return ":".join(rpaths)
+        for dll in dlls:
+            dll_lower = dll.lower()
+            for forbidden in forbidden_substrings:
+                assert forbidden not in dll_lower, f"Forbidden DLL '{dll}' imported by rabbit binary"
 
-    # 1. Binary RPATH must not contain hardcoded user or build dirs
-    bin_rpath = _get_rpath(rabbit_bin)
-    for forbidden in ("/home/", "/tmp/", "/opt/moose"):
-        assert forbidden not in bin_rpath
+        # 2. Test out-of-tree execution in an isolated directory without build environment on PATH
+        isolated_dir = tmp_path / "rabbit_isolated"
+        isolated_dir.mkdir(parents=True, exist_ok=True)
+        isolated_bin = isolated_dir / "rabbit.exe"
+        shutil.copy2(rabbit_bin, isolated_bin)
 
-    # 2. All bundled .so libraries must have relocatable RPATHs
-    if lib_dir.is_dir():
-        for so_file in lib_dir.glob("*.so*"):
-            if so_file.is_file() and not so_file.is_symlink():
-                so_rpath = _get_rpath(so_file)
-                for forbidden in ("/home/", "/tmp/", "/opt/moose"):
-                    assert forbidden not in so_rpath
-
-    # 3. Dynamic linker check with MOOSE_DIR and LD_LIBRARY_PATH unset
-    clean_env = {
-        k: v
-        for k, v in os.environ.items()
-        if not k.startswith(
-            ("MOOSE", "PETSC", "SLEPC", "LIBMESH", "LD_LIBRARY")
+        clean_env = {
+            "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
+            "PATH": r"C:\Windows\System32;C:\Windows",
+        }
+        res_version = subprocess.run(
+            [str(isolated_bin), "--version"],
+            env=clean_env,
+            capture_output=True,
+            text=True,
+            cwd=str(isolated_dir),
         )
-    }
-    clean_env["LD_LIBRARY_PATH"] = ""
-    ldd_res = subprocess.check_output(
-        ["ldd", str(rabbit_bin)], env=clean_env, text=True
-    )
-    for line in ldd_res.splitlines():
-        if "=>" in line:
-            _, target = line.split("=>", 1)
-            target_path = target.strip().split(" ")[0]
-            # Ensure no system MOOSE or home-directory libs leak in
-            if target_path.startswith("/home/"):
-                resolved_target = Path(target_path).resolve()
-                assert resolved_target.is_relative_to(lib_dir.resolve())
+        assert res_version.returncode == 0
+        assert "Application Version" in res_version.stdout
+
+        # 3. Test solve execution from isolated directory
+        input_path = cube_thermomech_input_path(EElemType.HEX8)
+        res_solve = subprocess.run(
+            [str(isolated_bin), "-i", str(input_path), "Executioner/end_time=1", "-pc_type", "ilu"],
+            env=clean_env,
+            capture_output=True,
+            text=True,
+            cwd=str(isolated_dir),
+        )
+        assert res_solve.returncode == 0
+        exodus_files = list(isolated_dir.glob("*.e"))
+        assert len(exodus_files) >= 1
+        assert exodus_files[0].stat().st_size > 0
+
+    else:
+        # Linux ELF relocatability checks
+        def _get_rpath(elf_path: Path) -> str:
+            res = subprocess.check_output(
+                ["readelf", "-d", str(elf_path)], text=True
+            )
+            rpaths: list[str] = []
+            for line in res.splitlines():
+                if "(RUNPATH)" in line or "(RPATH)" in line:
+                    rpaths.append(line.split("[")[1].split("]")[0])
+            return ":".join(rpaths)
+
+        # 1. Binary RPATH must not contain hardcoded user or build dirs
+        bin_rpath = _get_rpath(rabbit_bin)
+        for forbidden in ("/home/", "/tmp/", "/opt/moose"):
+            assert forbidden not in bin_rpath
+
+        # 2. All bundled .so libraries must have relocatable RPATHs
+        if lib_dir.is_dir():
+            for so_file in lib_dir.glob("*.so*"):
+                if so_file.is_file() and not so_file.is_symlink():
+                    so_rpath = _get_rpath(so_file)
+                    for forbidden in ("/home/", "/tmp/", "/opt/moose"):
+                        assert forbidden not in so_rpath
+
+        # 3. Dynamic linker check with MOOSE_DIR and LD_LIBRARY_PATH unset
+        clean_env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith(
+                ("MOOSE", "PETSC", "SLEPC", "LIBMESH", "LD_LIBRARY")
+            )
+        }
+        clean_env["LD_LIBRARY_PATH"] = ""
+        ldd_res = subprocess.check_output(
+            ["ldd", str(rabbit_bin)], env=clean_env, text=True
+        )
+        for line in ldd_res.splitlines():
+            if "=>" in line:
+                _, target = line.split("=>", 1)
+                target_path = target.strip().split(" ")[0]
+                if target_path.startswith("/home/"):
+                    resolved_target = Path(target_path).resolve()
+                    assert resolved_target.is_relative_to(lib_dir.resolve())
 
 

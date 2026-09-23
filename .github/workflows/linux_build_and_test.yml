@@ -1,0 +1,73 @@
+name: "Linux: Build Wheel and Test"
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  linux-build-and-test:
+    name: "Linux: Build Wheel and Test"
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: "Linux: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: "Linux: Install system packages"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gfortran libopenmpi-dev openmpi-bin patchelf
+
+      - name: "Linux: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "Linux: Set up Python"
+        run: |
+          uv python install 3.13
+          uv venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: "Linux: Install Python build tools"
+        run: |
+          uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh
+
+      - name: "Linux: Cache MOOSE and dependency builds"
+        uses: actions/cache@v4
+        id: moose-cache
+        with:
+          path: |
+            moose/petsc
+            moose/libmesh/installed
+            moose/framework/contrib/wasp/install
+            moose/framework/include/base/MooseConfig.h
+          key: linux-moose-build-${{ hashFiles('moose/petsc/**', 'moose/libmesh/**') }}
+          restore-keys: |
+            linux-moose-build-
+
+      - name: "Linux: Build MOOSE dependencies"
+        if: steps.moose-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --moose
+
+      - name: "Linux: Build Rabbit, stage artifacts, and build wheel"
+        run: |
+          uv run python build_rabbit.py --wheel
+
+      - name: "Linux: Run test suite"
+        run: |
+          uv run python build_rabbit.py --test
+
+      - name: "Linux: Upload wheel artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rabbit-fem-linux-wheel
+          path: dist/*.whl
+          if-no-files-found: error

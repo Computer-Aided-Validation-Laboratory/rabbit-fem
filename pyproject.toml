@@ -24,7 +24,7 @@ authors = [
 ]
 dependencies = [
     "ziglang>=0.16.0",
-    "patchelf>=0.17",
+    "patchelf>=0.17; sys_platform != 'win32'",
     "gmsh>=4.13.0",
 ]
 

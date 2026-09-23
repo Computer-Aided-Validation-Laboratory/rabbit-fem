@@ -514,15 +514,21 @@ def build_wheel(repo_dir: Path) -> Path:
         raise FileNotFoundError("No .whl package generated in dist/")
     raw_whl = wheels[-1]
 
-    # Retag from py3-none-any to manylinux platform tag
+    # Retag from py3-none-any to platform tag
     if "none-any" in raw_whl.name:
-        platform_tag = (
-            "manylinux_2_35_x86_64.manylinux_2_38_x86_64.linux_x86_64"
-        )
-        print(f"--> Retagging wheel for Linux platform: {platform_tag}")
-        wheel_bin = shutil.which("wheel") or str(
-            repo_dir / ".venv" / "bin" / "wheel"
-        )
+        if sys.platform == "win32":
+            platform_tag = "win_amd64"
+            wheel_bin = shutil.which("wheel") or str(
+                repo_dir / ".venv" / "Scripts" / "wheel.exe"
+            )
+        else:
+            platform_tag = (
+                "manylinux_2_35_x86_64.manylinux_2_38_x86_64.linux_x86_64"
+            )
+            wheel_bin = shutil.which("wheel") or str(
+                repo_dir / ".venv" / "bin" / "wheel"
+            )
+        print(f"--> Retagging wheel for platform: {platform_tag}")
         subprocess.run(
             [
                 wheel_bin,
@@ -593,6 +599,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--test",
+        "--tests",
+        dest="test",
         action="store_true",
         help="Run pytest simulation and relocatability test suite.",
     )

@@ -1,0 +1,76 @@
+name: "Windows: Build Wheel and Test"
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  windows-build-and-test:
+    name: "Windows: Build Wheel and Test"
+    runs-on: windows-latest
+
+    steps:
+      - name: "Windows: Configure git long paths"
+        run: git config --global core.longpaths true
+
+      - name: "Windows: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: "Windows: Set up MSYS2"
+        uses: msys2/setup-msys2@v2
+        with:
+          msys2-location: 'C:\msys64'
+          path-type: inherit
+          update: false
+          install: >-
+            make
+            diffutils
+            patch
+            python
+            m4
+
+      - name: "Windows: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "Windows: Set up Python"
+        run: |
+          uv python install 3.13
+          uv venv .venv
+
+      - name: "Windows: Cache MOOSE and dependency builds"
+        uses: actions/cache@v4
+        id: moose-windows-cache
+        with:
+          path: |
+            moose/petsc/arch-windows-opt
+            moose/libmesh/installed
+            moose/framework/contrib/wasp/install
+            moose/framework/contrib/wasp/build
+            moose/framework/contrib/hit/hit.exe
+            moose/framework/include/base/MooseConfig.h
+          key: windows-moose-build-${{ hashFiles('moose/petsc/**', 'moose/libmesh/**') }}
+          restore-keys: |
+            windows-moose-build-
+
+      - name: "Windows: Build MOOSE dependencies and Rabbit"
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1
+
+      - name: "Windows: Package standalone wheel and run tests"
+        run: |
+          uv run python build_rabbit.py --wheel-only --test
+
+      - name: "Windows: Upload wheel artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rabbit-fem-windows-wheel
+          path: dist/*.whl
+          if-no-files-found: error
