@@ -64,8 +64,6 @@ jobs:
             moose/framework/contrib/wasp/install
             moose/framework/include/base/MooseConfig.h
           key: linux-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
-          restore-keys: |
-            linux-moose-build-
 
       - name: "Linux: Build MOOSE dependencies"
         if: steps.moose-cache.outputs.cache-hit != 'true'

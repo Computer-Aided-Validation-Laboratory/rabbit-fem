@@ -294,7 +294,26 @@ def build_moose_dependencies(
         moose_dir / "libmesh" / "contrib" / "timpi" / "README"
     )
     if not (petsc_cfg.is_file() and timpi_readme.is_file()):
-        print("Initializing MOOSE git submodules (petsc, libmesh, wasp)...")
+        for sub_name in [
+            "petsc",
+            "libmesh",
+            "framework/contrib/wasp",
+        ]:
+            target_sub = moose_dir / sub_name
+            if (
+                target_sub.is_dir()
+                and not (target_sub / ".git").exists()
+            ):
+                print(
+                    f"Removing non-git directory before checkout: "
+                    f"{target_sub}"
+                )
+                shutil.rmtree(target_sub)
+
+        print(
+            "Initializing MOOSE git submodules "
+            "(petsc, libmesh, wasp)..."
+        )
         submodule_cmd = [
             "git",
             "submodule",
@@ -304,7 +323,6 @@ def build_moose_dependencies(
             "petsc",
             "libmesh",
             "framework/contrib/wasp",
-            "framework/contrib/hit",
         ]
         max_attempts = 5
         for attempt in range(1, max_attempts + 1):

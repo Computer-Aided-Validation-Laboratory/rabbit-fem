@@ -120,6 +120,12 @@ if (Test-Path $MooseVersionFile) {
 $MooseFrameworkMk = Join-Path $MooseDir "framework\build.mk"
 $MoosePetscCfg = Join-Path $RepoRoot "moose\petsc\configure"
 $MooseLibmeshCfg = Join-Path $RepoRoot "moose\libmesh\configure"
+$PetscLib = Join-Path $RepoRoot "moose\petsc\arch-windows-opt\lib\libpetsc.a"
+$LibMeshLib = Join-Path $RepoRoot "moose\libmesh\installed\lib\libmesh_opt.a"
+$HitExe = Join-Path $RepoRoot "moose\framework\contrib\hit\hit.exe"
+$MooseConfig = Join-Path $RepoRoot "moose\framework\include\base\MooseConfig.h"
+
+$AllDepsBuilt = (Test-Path $PetscLib) -and (Test-Path $LibMeshLib) -and (Test-Path $HitExe) -and (Test-Path $MooseConfig)
 
 if (-not (Test-Path $MooseFrameworkMk)) {
     if (-not (Test-Path $MooseDir)) {
@@ -130,8 +136,16 @@ if (-not (Test-Path $MooseFrameworkMk)) {
     Invoke-MsysBash "cd moose && git checkout -f $MooseCommit" "Checking out MOOSE at commit $MooseCommit"
 }
 
-if (-not (Test-Path $MoosePetscCfg) -or -not (Test-Path $MooseLibmeshCfg)) {
-    $submoduleCmd = "cd moose && git config core.autocrlf false && git submodule update --init --recursive petsc libmesh framework/contrib/wasp framework/contrib/hit"
+if (-not $AllDepsBuilt -and (-not (Test-Path $MoosePetscCfg) -or -not (Test-Path $MooseLibmeshCfg))) {
+    foreach ($sub in @("libmesh", "framework\contrib\wasp", "petsc")) {
+        $target = Join-Path $MooseDir $sub
+        if ((Test-Path $target) -and (-not (Test-Path (Join-Path $target ".git")))) {
+            Write-Host "[!] Cleaning non-git submodule directory: $target" -ForegroundColor Yellow
+            Remove-Item -Recurse -Force $target
+        }
+    }
+
+    $submoduleCmd = "cd moose && git config core.autocrlf false && git submodule update --init --recursive petsc libmesh framework/contrib/wasp"
     $maxAttempts = 5
     $attempt = 1
     $success = $false
