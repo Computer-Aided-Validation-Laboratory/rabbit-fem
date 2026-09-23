@@ -63,7 +63,7 @@ jobs:
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
             moose/framework/include/base/MooseConfig.h
-          key: windows-moose-build-${{ hashFiles('moose/petsc/**', 'moose/libmesh/**') }}
+          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**') }}
           restore-keys: |
             windows-moose-build-
 

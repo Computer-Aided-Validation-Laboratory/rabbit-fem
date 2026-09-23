@@ -57,6 +57,10 @@ $WrappersDir = Join-Path $RepoRoot ".zig_wrappers"
 if (-not (Test-Path $WrappersDir)) {
     New-Item -ItemType Directory -Force -Path $WrappersDir | Out-Null
 }
+$srcWrappersDir = Join-Path $RepoRoot "scripts\windows_wrappers"
+if (Test-Path $srcWrappersDir) {
+    Copy-Item (Join-Path $srcWrappersDir "*.py") $WrappersDir -Force
+}
 $pyWinPath = $VenvPython.Replace('\', '/')
 $wrappers = @(
     @{ Name = "zig-cc"; Script = "cc_wrapper.py" },
@@ -85,6 +89,35 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
         throw "$StepTitle failed with exit code $LASTEXITCODE."
     }
     Write-Host "[OK] $StepTitle completed successfully." -ForegroundColor Green
+}
+
+# 5.5. Ensure MOOSE repository and submodules
+$MooseDir = Join-Path $RepoRoot "moose"
+$MooseVersionFile = Join-Path $RepoRoot "moose_version.txt"
+$MooseCommit = "73c6aa53af67b8046f7ace5fd1c96846d5d6641d"
+if (Test-Path $MooseVersionFile) {
+    $MooseCommit = (Get-Content $MooseVersionFile).Trim()
+}
+$MooseFrameworkMk = Join-Path $MooseDir "framework\build.mk"
+$MoosePetscCfg = Join-Path $RepoRoot "moose\petsc\configure"
+$MooseLibmeshCfg = Join-Path $RepoRoot "moose\libmesh\configure"
+
+if (-not (Test-Path $MooseFrameworkMk)) {
+    if (-not (Test-Path $MooseDir)) {
+        Invoke-MsysBash "git clone --branch next https://github.com/idaholab/moose.git moose" "Cloning upstream MOOSE repository (next branch)"
+    } else {
+        Invoke-MsysBash "cd moose && git init && git remote add origin https://github.com/idaholab/moose.git 2>/dev/null || true && git fetch --depth 50 origin next" "Fetching MOOSE repository"
+    }
+    Invoke-MsysBash "cd moose && git checkout -f $MooseCommit" "Checking out MOOSE at commit $MooseCommit"
+}
+
+if (-not (Test-Path $MoosePetscCfg) -or -not (Test-Path $MooseLibmeshCfg)) {
+    Invoke-MsysBash "cd moose && git config core.autocrlf false && git submodule update --init --recursive petsc libmesh framework/contrib/wasp framework/contrib/hit" "Initializing MOOSE submodules at commit $MooseCommit"
+
+    $fixSymlinks = Join-Path $RepoRoot "moose\libmesh\contrib\bin\fix_windows_symlinks.sh"
+    if (Test-Path $fixSymlinks) {
+        Invoke-MsysBash "cd moose/libmesh/contrib && sed -i 's/\$(shell git rev-parse --show-toplevel)/\$(git rev-parse --show-toplevel)/g' bin/fix_windows_symlinks.sh && ./bin/fix_windows_symlinks.sh" "Fixing libMesh Windows symlinks"
+    }
 }
 
 # 6. Build PETSc

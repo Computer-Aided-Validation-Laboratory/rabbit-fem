@@ -204,7 +204,76 @@ def get_moose_dir(
 
 
 
+def get_pinned_moose_version(repo_dir: Path) -> str:
+    """Read pinned MOOSE commit hash from moose_version.txt."""
+    version_file = repo_dir / "moose_version.txt"
+    if version_file.is_file():
+        commit = version_file.read_text(encoding="utf-8").strip()
+        if commit:
+            return commit
+    return "73c6aa53af67b8046f7ace5fd1c96846d5d6641d"
+
+
+def ensure_moose_repo(repo_dir: Path, moose_dir: Path) -> None:
+    """Ensure the MOOSE repository framework files exist at pinned commit."""
+    target_commit = get_pinned_moose_version(repo_dir)
+    framework_mk = moose_dir / "framework" / "build.mk"
+    if framework_mk.is_file():
+        return
+
+    print(
+        f"Ensuring MOOSE repository at {moose_dir} "
+        f"(pinned to {target_commit[:10]})..."
+    )
+    if not moose_dir.is_dir():
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--branch",
+                "next",
+                "https://github.com/idaholab/moose.git",
+                str(moose_dir),
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "checkout", target_commit],
+            cwd=str(moose_dir),
+            check=True,
+        )
+    else:
+        # Directory exists from cache; initialize and overlay framework
+        subprocess.run(
+            ["git", "init"],
+            cwd=str(moose_dir),
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/idaholab/moose.git",
+            ],
+            cwd=str(moose_dir),
+            check=False,
+        )
+        subprocess.run(
+            ["git", "fetch", "--depth", "50", "origin", "next"],
+            cwd=str(moose_dir),
+            check=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "-f", target_commit],
+            cwd=str(moose_dir),
+            check=True,
+        )
+
+
 def build_moose_dependencies(
+    repo_dir: Path,
     moose_dir: Path,
     zigcc_path: Path,
     zigcxx_path: Path,
@@ -216,19 +285,7 @@ def build_moose_dependencies(
     print(f" Parallel jobs: {jobs}")
     print("=" * 60)
 
-    if not moose_dir.is_dir():
-        print("Cloning upstream MOOSE repository...")
-        subprocess.run(
-            [
-                "git",
-                "clone",
-                "https://github.com/idaholab/moose.git",
-                str(moose_dir),
-            ],
-            check=True,
-        )
-    else:
-        print(f"MOOSE repository found at {moose_dir}")
+    ensure_moose_repo(repo_dir, moose_dir)
 
     # Check and initialize submodules if not checked out
     petsc_cfg = moose_dir / "petsc" / "configure"
@@ -331,10 +388,10 @@ def build_rabbit_binary(
     zigcxx_path: Path,
 ) -> Path:
     """Compile RabbitApp and link rabbit-opt."""
-    if not moose_dir.is_dir():
+    ensure_moose_repo(repo_dir, moose_dir)
+    if not (moose_dir / "framework" / "build.mk").is_file():
         raise FileNotFoundError(
-            f"MOOSE directory {moose_dir} does not exist. "
-            "Run with --moose first."
+            f"MOOSE framework not found in {moose_dir}."
         )
 
     env = dict(os.environ)
@@ -456,8 +513,13 @@ def stage_artifacts(
 
     resolved_libs = find_needed_libraries(binary_path, available_libs)
 
-    omp_candidates = glob.glob("/opt/rocm-*/lib/llvm/lib-debug/libomp.so")
-    if omp_candidates:
+    omp_candidates = (
+        glob.glob("/opt/rocm-*/lib/llvm/lib-debug/libomp.so")
+        + glob.glob("/opt/rocm-*/lib/llvm/lib/libomp.so")
+        + glob.glob("/usr/lib/llvm-*/lib/libomp.so")
+        + glob.glob("/usr/lib/x86_64-linux-gnu/libomp.so*")
+    )
+    if omp_candidates and "libomp.so" not in resolved_libs:
         resolved_libs["libomp.so"] = Path(omp_candidates[-1]).resolve()
 
     for soname, real_path in resolved_libs.items():
@@ -650,7 +712,9 @@ def main() -> None:
 
     # 2. If --moose or --all requested, build MOOSE dependencies
     if args.moose is not None or args.all:
-        build_moose_dependencies(moose_dir, zigcc_path, zigcxx_path)
+        build_moose_dependencies(
+            repo_dir, moose_dir, zigcc_path, zigcxx_path
+        )
         if args.moose is not None and not args.all and not args.wheel:
             return
 

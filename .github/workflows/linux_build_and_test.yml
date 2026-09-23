@@ -34,7 +34,8 @@ jobs:
             libopenmpi-dev \
             openmpi-bin \
             patchelf \
-            libtirpc-dev
+            libtirpc-dev \
+            libomp-dev
 
       - name: "Linux: Set up uv"
         uses: astral-sh/setup-uv@v5
@@ -61,7 +62,7 @@ jobs:
             moose/libmesh/installed
             moose/framework/contrib/wasp/install
             moose/framework/include/base/MooseConfig.h
-          key: linux-moose-build-${{ hashFiles('moose/petsc/**', 'moose/libmesh/**') }}
+          key: linux-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
           restore-keys: |
             linux-moose-build-
 
