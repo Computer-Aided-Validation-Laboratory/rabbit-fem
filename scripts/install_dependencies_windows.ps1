@@ -28,11 +28,12 @@ if (-not (Test-Path $MsysBash)) {
 Write-Host "[OK] MSYS2 found at $MsysBash" -ForegroundColor Green
 
 $MsysGit = "C:\msys64\usr\bin\git.exe"
-if (-not (Test-Path $MsysGit)) {
-    Write-Host "[*] Installing git in MSYS2..." -ForegroundColor Yellow
-    & "C:\msys64\usr\bin\pacman.exe" -S --needed --noconfirm git
+$MsysPython = "C:\msys64\usr\bin\python3.exe"
+if (-not (Test-Path $MsysGit) -or -not (Test-Path $MsysPython)) {
+    Write-Host "[*] Installing required MSYS2 packages (git, python)..." -ForegroundColor Yellow
+    & "C:\msys64\usr\bin\pacman.exe" -S --needed --noconfirm msys/git msys/python
 }
-Write-Host "[OK] MSYS2 git verified." -ForegroundColor Green
+Write-Host "[OK] MSYS2 git and python3 verified." -ForegroundColor Green
 
 # 2. Check or create Python virtual environment with uv
 $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
@@ -89,7 +90,7 @@ Write-Host "[OK] Compiler wrappers configured in $WrappersDir" -ForegroundColor 
 # Helper function to run bash commands
 function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     Write-Host "`n>>> $StepTitle..." -ForegroundColor Cyan
-    $setupCmd = "export PATH=`"$RepoRootPosix/.venv/Scripts:/usr/bin:`$PATH`" && cd `"$RepoRootPosix`" && "
+    $setupCmd = "export PATH=`"/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`" && cd `"$RepoRootPosix`" && "
     $combined = $setupCmd + $BashCommand
     & $MsysBash -lc $combined
     if ($LASTEXITCODE -ne 0) {
@@ -133,7 +134,7 @@ if (-not (Test-Path $MoosePetscCfg) -or -not (Test-Path $MooseLibmeshCfg)) {
 # 6. Build PETSc
 $PetscLib = Join-Path $RepoRoot "moose\petsc\arch-windows-opt\lib\libpetsc.a"
 if (-not (Test-Path $PetscLib)) {
-    $petscConfig = "cd moose/petsc && ./configure PETSC_ARCH=arch-windows-opt --with-cc=$RepoRootPosix/.zig_wrappers/zig-cc --with-cxx=$RepoRootPosix/.zig_wrappers/zig-cxx --with-ar=$RepoRootPosix/.zig_wrappers/zig-ar --with-ranlib=$RepoRootPosix/.zig_wrappers/zig-ranlib --with-fc=0 --with-mpi=0 --with-shared-libraries=0 --with-debugging=0 --download-f2cblaslapack=1 --with-make-np=$Jobs && make PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt all"
+    $petscConfig = "cd moose/petsc && python3 ./configure PETSC_ARCH=arch-windows-opt --with-cc=$RepoRootPosix/.zig_wrappers/zig-cc --with-cxx=$RepoRootPosix/.zig_wrappers/zig-cxx --with-ar=$RepoRootPosix/.zig_wrappers/zig-ar --with-ranlib=$RepoRootPosix/.zig_wrappers/zig-ranlib --with-fc=0 --with-mpi=0 --with-shared-libraries=0 --with-debugging=0 --download-f2cblaslapack=1 --with-make-np=$Jobs && make PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt all"
     Invoke-MsysBash $petscConfig "Configuring and building PETSc (arch-windows-opt)"
 } else {
     Write-Host "[OK] PETSc already built at $PetscLib" -ForegroundColor Green
