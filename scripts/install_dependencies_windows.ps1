@@ -102,25 +102,11 @@ Write-Host "[OK] Compiler wrappers configured in $WrappersDir" -ForegroundColor 
 # Helper function to run bash commands
 function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     Write-Host "`n>>> $StepTitle..." -ForegroundColor Cyan
-    $setupCmd = "export PATH=`"/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`"`ncd `"$RepoRootPosix`"`n"
-    $scriptContent = "set -e`n" + $setupCmd + $BashCommand + "`n"
-    $scriptFile = Join-Path $RepoRoot "_run_step.sh"
-    [System.IO.File]::WriteAllText($scriptFile, $scriptContent)
-
-    $logFile = Join-Path $RepoRoot "last_step.log"
-    if (Test-Path $logFile) { Remove-Item -Force $logFile }
-
-    & $MsysBash -l "$RepoRootPosix/_run_step.sh" 2>&1 | Tee-Object -FilePath $logFile
-    $code = $LASTEXITCODE
-    if ($code -ne 0) {
-        Write-Host "[!] $StepTitle FAILED with exit code $code" -ForegroundColor Red
-        if (Test-Path $logFile) {
-            $tail = Get-Content $logFile -Tail 150
-            Write-Host "`n--- LAST 150 LINES OF LOG ---" -ForegroundColor Red
-            $tail | ForEach-Object { Write-Host $_ }
-            Write-Host "--- END OF LOG ---`n" -ForegroundColor Red
-        }
-        throw "$StepTitle failed with exit code $code."
+    $setupCmd = "export PATH=`"/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`" && cd `"$RepoRootPosix`" && "
+    $combined = $setupCmd + $BashCommand
+    & $MsysBash -lc $combined
+    if ($LASTEXITCODE -ne 0) {
+        throw "$StepTitle failed with exit code $LASTEXITCODE."
     }
     Write-Host "[OK] $StepTitle completed successfully." -ForegroundColor Green
 }
@@ -244,7 +230,7 @@ if (-not (Test-Path $MooseConfig)) {
 # 10. Build Rabbit
 $RabbitExe = Join-Path $RepoRoot "rabbit-$Method.exe"
 Write-Host "`n[*] Building Rabbit application (rabbit-$Method.exe)..." -ForegroundColor Yellow
-$rabbitBuild = "cd $RepoRootPosix && make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a && if [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
+$rabbitBuild = "cd $RepoRootPosix && set -o pipefail && make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a 2>&1 | tee make.log && if [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
 Invoke-MsysBash $rabbitBuild "Compiling and linking Rabbit"
 
 if (-not (Test-Path $RabbitExe)) {

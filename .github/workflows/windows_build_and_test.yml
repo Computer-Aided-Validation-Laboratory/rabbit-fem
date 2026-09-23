@@ -126,6 +126,7 @@ jobs:
         with:
           name: windows-build-failure-logs
           path: |
+            make.log
             last_step.log
             moose/petsc/arch-windows-opt/lib/petsc/conf/configure.log
           if-no-files-found: ignore
@@ -135,8 +136,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if (Test-Path last_step.log) {
-            $tail = Get-Content last_step.log -Tail 100
-            $body = "### ❌ Windows Build Failure on commit ${{ github.sha }}`n`n``````text`n$($tail -join "`n")`n```````n"
-            $body | gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments --input -
+          $logPath = if (Test-Path make.log) { "make.log" } elseif (Test-Path last_step.log) { "last_step.log" } else { $null }
+          if ($logPath) {
+            $tail = (Get-Content $logPath -Tail 80) -join "`n"
+            "### ❌ Windows Build Failure on commit ${{ github.sha }}`n`n``````text`n$tail`n```````n" | Set-Content comment.txt
+            gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -F body=@comment.txt
           }
