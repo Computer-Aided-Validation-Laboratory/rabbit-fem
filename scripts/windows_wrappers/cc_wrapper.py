@@ -34,6 +34,7 @@ def transform_args(args: List[str]) -> List[str]:
         "-fno-sanitize=all",
         "-Wno-nullability-completeness",
         "-Wno-unused-command-line-argument",
+        "-Wno-date-time",
     ):
         if flag not in result:
             result.append(flag)

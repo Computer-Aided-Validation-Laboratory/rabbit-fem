@@ -154,7 +154,7 @@ if (-not (Test-Path $PetscLib)) {
 # 7. Build libMesh
 $LibMeshLib = Join-Path $RepoRoot "moose\libmesh\installed\lib\libmesh_opt.a"
 if (-not (Test-Path $LibMeshLib)) {
-    $libmeshBuild = "cd moose/libmesh && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --without-mpi --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-petsc=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
+    $libmeshBuild = "cd moose/libmesh && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --with-petsc=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
     Invoke-MsysBash $libmeshBuild "Configuring and building libMesh"
 } else {
     Write-Host "[OK] libMesh already built at $LibMeshLib" -ForegroundColor Green
