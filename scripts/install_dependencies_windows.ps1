@@ -102,11 +102,16 @@ Write-Host "[OK] Compiler wrappers configured in $WrappersDir" -ForegroundColor 
 # Helper function to run bash commands
 function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     Write-Host "`n>>> $StepTitle..." -ForegroundColor Cyan
+    $localLog = Join-Path $RepoRoot "current_step.log"
+    if (Test-Path $localLog) { Remove-Item -Force $localLog }
+
     $setupCmd = "export PATH=`"/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`" && cd `"$RepoRootPosix`" && "
-    $combined = $setupCmd + $BashCommand
+    $stepLog = "$RepoRootPosix/current_step.log"
+    $combined = "set -o pipefail && ( " + $setupCmd + $BashCommand + " ) 2>&1 | tee " + $stepLog
     & $MsysBash -lc $combined
-    if ($LASTEXITCODE -ne 0) {
-        throw "$StepTitle failed with exit code $LASTEXITCODE."
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        throw "$StepTitle failed with exit code $code."
     }
     Write-Host "[OK] $StepTitle completed successfully." -ForegroundColor Green
 }
@@ -230,7 +235,7 @@ if (-not (Test-Path $MooseConfig)) {
 # 10. Build Rabbit
 $RabbitExe = Join-Path $RepoRoot "rabbit-$Method.exe"
 Write-Host "`n[*] Building Rabbit application (rabbit-$Method.exe)..." -ForegroundColor Yellow
-$rabbitBuild = "cd $RepoRootPosix && set -o pipefail && make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a 2>&1 | tee make.log && if [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
+$rabbitBuild = "make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a && if [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
 Invoke-MsysBash $rabbitBuild "Compiling and linking Rabbit"
 
 if (-not (Test-Path $RabbitExe)) {

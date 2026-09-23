@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+  issues: write
   id-token: write
 
 jobs:
@@ -126,6 +128,7 @@ jobs:
         with:
           name: windows-build-failure-logs
           path: |
+            current_step.log
             make.log
             last_step.log
             moose/petsc/arch-windows-opt/lib/petsc/conf/configure.log
@@ -136,9 +139,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $logPath = if (Test-Path make.log) { "make.log" } elseif (Test-Path last_step.log) { "last_step.log" } else { $null }
+          $logPath = if (Test-Path current_step.log) { "current_step.log" } elseif (Test-Path make.log) { "make.log" } elseif (Test-Path last_step.log) { "last_step.log" } else { $null }
           if ($logPath) {
-            $tail = (Get-Content $logPath -Tail 80) -join "`n"
-            "### ❌ Windows Build Failure on commit ${{ github.sha }}`n`n``````text`n$tail`n```````n" | Set-Content comment.txt
-            gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments -F body=@comment.txt
+            $tail = (Get-Content $logPath -Tail 150) -join "`n"
+            $commentBody = "### ❌ Windows Build Failure on commit ${{ github.sha }}`n`n``````text`n$tail`n```````n"
+            [System.IO.File]::WriteAllText((Join-Path (Get-Location) "comment.txt"), $commentBody, [System.Text.Encoding]::UTF8)
+            try {
+              gh pr comment 1 -R ${{ github.repository }} --body-file comment.txt
+            } catch {
+              Write-Host "PR comment failed: $_"
+            }
+            try {
+              gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -f "body=@comment.txt"
+            } catch {
+              Write-Host "Commit comment failed: $_"
+            }
+            try {
+              gh api "repos/${{ github.repository }}/issues/1/comments" -f "body=@comment.txt"
+            } catch {
+              Write-Host "Issue comment failed: $_"
+            }
           }
