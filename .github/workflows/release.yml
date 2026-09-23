@@ -146,6 +146,11 @@ jobs:
           install: >-
             make
             diffutils
+            patch
+            python
+            m4
+            git
+            cmake
 
       - name: "Windows: Set up uv"
         uses: astral-sh/setup-uv@v5

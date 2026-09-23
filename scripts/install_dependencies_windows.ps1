@@ -12,6 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:MSYS2_PATH_TYPE = "inherit"
 $RepoRoot = (Get-Item $PSScriptRoot).Parent.FullName
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host " Rabbit-FEM Windows Native Build Toolchain" -ForegroundColor Cyan
@@ -27,7 +28,7 @@ if (-not (Test-Path $MsysBash)) {
 }
 Write-Host "[OK] MSYS2 found at $MsysBash" -ForegroundColor Green
 
-$requiredMsysTools = @("diff.exe", "make.exe", "patch.exe", "m4.exe", "git.exe", "python3.exe")
+$requiredMsysTools = @("diff.exe", "make.exe", "patch.exe", "m4.exe", "git.exe", "python3.exe", "cmake.exe")
 $needsInstall = $false
 foreach ($tool in $requiredMsysTools) {
     if (-not (Test-Path "C:\msys64\usr\bin\$tool")) {
@@ -37,14 +38,14 @@ foreach ($tool in $requiredMsysTools) {
 }
 if ($needsInstall) {
     Write-Host "[*] Synchronizing MSYS2 database and installing required packages..." -ForegroundColor Yellow
-    & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python
+    & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/cmake
 }
 foreach ($tool in $requiredMsysTools) {
     if (-not (Test-Path "C:\msys64\usr\bin\$tool")) {
         throw "Failed to install required MSYS2 tool C:\msys64\usr\bin\$tool."
     }
 }
-Write-Host "[OK] MSYS2 required tools verified (diff, make, patch, m4, git, python3)." -ForegroundColor Green
+Write-Host "[OK] MSYS2 required tools verified (diff, make, patch, m4, git, python3, cmake)." -ForegroundColor Green
 
 # 2. Check or create Python virtual environment with uv
 $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
@@ -207,7 +208,11 @@ if (-not (Test-Path $LibMeshLib)) {
 # 8. Build WASP and HIT
 $HitExe = Join-Path $RepoRoot "moose\framework\contrib\hit\hit.exe"
 if (-not (Test-Path $HitExe)) {
-    $waspBuild = "cd moose/framework/contrib/wasp && mkdir -p build && cd build && cmake -G `"MinGW Makefiles`" -DCMAKE_C_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cc`" -DCMAKE_CXX_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cxx`" -DCMAKE_AR=`"$RepoRootPosix/.zig_wrappers/zig-ar`" -DCMAKE_RANLIB=`"$RepoRootPosix/.zig_wrappers/zig-ranlib`" -DCMAKE_INSTALL_PREFIX=`"$RepoRootPosix/moose/framework/contrib/wasp/install`" -DBUILD_SHARED_LIBS=OFF .. && make -j$Jobs && make install && cd $RepoRootPosix/moose/framework/contrib/hit && make -j$Jobs"
+    # Patch WASP Format.h for modern MinGW / Clang compatibility (_TWO_DIGIT_EXPONENT)
+    $patchWasp = "cd moose/framework/contrib/wasp && sed -i 's/defined(__GNUC__)/defined(__GNUC__) \&\& defined(_TWO_DIGIT_EXPONENT)/g' waspcore/Format.h"
+    Invoke-MsysBash $patchWasp "Patching WASP Format.h for MinGW"
+
+    $waspBuild = "cd moose/framework/contrib/wasp && mkdir -p build && cd build && cmake -G `"Unix Makefiles`" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cc`" -DCMAKE_CXX_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cxx`" -DCMAKE_AR=`"$RepoRootPosix/.zig_wrappers/zig-ar`" -DCMAKE_RANLIB=`"$RepoRootPosix/.zig_wrappers/zig-ranlib`" -DCMAKE_INSTALL_PREFIX=`"$RepoRootPosix/moose/framework/contrib/wasp/install`" -DCMAKE_BUILD_TYPE=RELEASE -Dwasp_ENABLE_ALL_PACKAGES=OFF -Dwasp_ENABLE_wasphit=ON -Dwasp_ENABLE_wasplsp=ON -Dwasp_ENABLE_waspsiren=ON -Dwasp_ENABLE_waspplot=ON -Dwasp_ENABLE_testframework=OFF -Dwasp_ENABLE_TESTS=OFF -DBUILD_SHARED_LIBS=OFF -DDISABLE_HIT_TYPE_PROMOTION=ON .. && make -j$Jobs && make install && cd $RepoRootPosix/moose/framework/contrib/hit && make -j$Jobs hit CXX=`"$RepoRootPosix/.zig_wrappers/zig-cxx`" WASP_DIR=`"$RepoRootPosix/moose/framework/contrib/wasp/install`" lib_suffix=a && if [ -f hit ] && [ ! -f hit.exe ]; then cp hit hit.exe; fi"
     Invoke-MsysBash $waspBuild "Building WASP and HIT parser"
 } else {
     Write-Host "[OK] HIT parser already built at $HitExe" -ForegroundColor Green
@@ -225,7 +230,7 @@ if (-not (Test-Path $MooseConfig)) {
 # 10. Build Rabbit
 $RabbitExe = Join-Path $RepoRoot "rabbit-$Method.exe"
 Write-Host "`n[*] Building Rabbit application (rabbit-$Method.exe)..." -ForegroundColor Yellow
-$rabbitBuild = "cd $RepoRootPosix && make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install"
+$rabbitBuild = "cd $RepoRootPosix && make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install && if [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
 Invoke-MsysBash $rabbitBuild "Compiling and linking Rabbit"
 
 if (-not (Test-Path $RabbitExe)) {
