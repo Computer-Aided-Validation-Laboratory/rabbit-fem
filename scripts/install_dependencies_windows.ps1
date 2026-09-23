@@ -190,6 +190,10 @@ if (-not (Test-Path $LibMeshLib)) {
     $fixEigen = "cd moose/libmesh/contrib && if [ -d eigen/git/Eigen ]; then rm -rf eigen/gitshim/Eigen eigen/gitshim/unsupported eigen/gitshim/root && cp -r eigen/git/Eigen eigen/gitshim/Eigen && cp -r eigen/git/unsupported eigen/gitshim/unsupported && cp -r eigen/git eigen/gitshim/root && rm -rf eigen/eigen && cp -r eigen/gitshim eigen/eigen; fi && test -f eigen/eigen/Eigen/Householder"
     Invoke-MsysBash $fixEigen "Resolving and verifying Eigen headers for Windows"
 
+    # Patch NetCDF dwinpath.c for MinGW (realpath -> _fullpath, missing errno.h)
+    $patchNetcdf = "cd moose/libmesh/contrib/netcdf/netcdf-c-4.6.2/libdispatch && sed -i 's/#include <assert.h>/#include <assert.h>\n#include <errno.h>/' dwinpath.c && sed -i 's/#ifdef _MSC_VER/#if defined(_MSC_VER) || defined(_WIN32)/g' dwinpath.c && sed -i 's/path = realpath(relpath, NULL);/path = _fullpath(NULL,relpath,8192);/' dwinpath.c"
+    Invoke-MsysBash $patchNetcdf "Patching NetCDF dwinpath.c for MinGW"
+
     $libmeshBuild = "cd moose/libmesh && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --with-petsc=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
     Invoke-MsysBash $libmeshBuild "Configuring and building libMesh"
 } else {
