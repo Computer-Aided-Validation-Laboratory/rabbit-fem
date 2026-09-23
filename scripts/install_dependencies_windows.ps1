@@ -104,9 +104,32 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     Write-Host "`n>>> $StepTitle..." -ForegroundColor Cyan
     $setupCmd = "export PATH=`"/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`" && cd `"$RepoRootPosix`" && "
     $combined = $setupCmd + $BashCommand
-    & $MsysBash -lc $combined
-    if ($LASTEXITCODE -ne 0) {
-        throw "$StepTitle failed with exit code $LASTEXITCODE."
+    $logFile = Join-Path $RepoRoot "last_step.log"
+    if (Test-Path $logFile) { Remove-Item -Force $logFile }
+
+    & $MsysBash -lc "$combined 2>&1" | Tee-Object -FilePath $logFile
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        Write-Host "[!] $StepTitle FAILED with exit code $code" -ForegroundColor Red
+        if (Test-Path $logFile) {
+            $tail = Get-Content $logFile -Tail 150
+            Write-Host "`n--- LAST 150 LINES OF LOG ---" -ForegroundColor Red
+            $tail | ForEach-Object { Write-Host $_ }
+            Write-Host "--- END OF LOG ---`n" -ForegroundColor Red
+
+            try {
+                $pasteUrl = (Invoke-RestMethod -Uri "https://paste.rs" -Method Post -InFile $logFile -TimeoutSec 10).Trim()
+                Write-Host "[*] Full build log uploaded: $pasteUrl" -ForegroundColor Yellow
+                if ($env:GITHUB_STEP_SUMMARY) {
+                    Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### ❌ $StepTitle Failed (exit code $code)`n`n[View Full Build Log]($pasteUrl)`n`n``````text`n$($tail -join "`n")`n```````n"
+                }
+            } catch {
+                if ($env:GITHUB_STEP_SUMMARY) {
+                    Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### ❌ $StepTitle Failed (exit code $code)`n`n``````text`n$($tail -join "`n")`n```````n"
+                }
+            }
+        }
+        throw "$StepTitle failed with exit code $code."
     }
     Write-Host "[OK] $StepTitle completed successfully." -ForegroundColor Green
 }
@@ -230,7 +253,7 @@ if (-not (Test-Path $MooseConfig)) {
 # 10. Build Rabbit
 $RabbitExe = Join-Path $RepoRoot "rabbit-$Method.exe"
 Write-Host "`n[*] Building Rabbit application (rabbit-$Method.exe)..." -ForegroundColor Yellow
-$rabbitBuild = "cd $RepoRootPosix && make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install && if [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
+$rabbitBuild = "cd $RepoRootPosix && make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a && if [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
 Invoke-MsysBash $rabbitBuild "Compiling and linking Rabbit"
 
 if (-not (Test-Path $RabbitExe)) {

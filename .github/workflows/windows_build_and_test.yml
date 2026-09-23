@@ -119,3 +119,13 @@ jobs:
           name: rabbit-fem-windows-wheel
           path: dist/*.whl
           if-no-files-found: error
+
+      - name: "Windows: Upload build failure logs"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-failure-logs
+          path: |
+            last_step.log
+            moose/petsc/arch-windows-opt/lib/petsc/conf/configure.log
+          if-no-files-found: ignore
