@@ -232,7 +232,10 @@ def build_moose_dependencies(
 
     # Check and initialize submodules if not checked out
     petsc_cfg = moose_dir / "petsc" / "configure"
-    if not petsc_cfg.is_file():
+    timpi_readme = (
+        moose_dir / "libmesh" / "contrib" / "timpi" / "README"
+    )
+    if not (petsc_cfg.is_file() and timpi_readme.is_file()):
         print("Initializing MOOSE git submodules (petsc, libmesh, wasp)...")
         subprocess.run(
             [
@@ -240,6 +243,7 @@ def build_moose_dependencies(
                 "submodule",
                 "update",
                 "--init",
+                "--recursive",
                 "petsc",
                 "libmesh",
                 "framework/contrib/wasp",
@@ -289,7 +293,6 @@ def build_moose_dependencies(
     subprocess.run(
         [
             "./scripts/update_and_rebuild_libmesh.sh",
-            "--skip-submodule-update",
             "--with-mpi",
         ],
         cwd=str(moose_dir),
