@@ -30,6 +30,14 @@ def transform_args(args: List[str]) -> List[str]:
     if not has_target:
         result = ["-target", "x86_64-windows-gnu"] + result
 
+    for flag in (
+        "-fno-sanitize=all",
+        "-Wno-nullability-completeness",
+        "-Wno-unused-command-line-argument",
+    ):
+        if flag not in result:
+            result.append(flag)
+
     return result
 
 

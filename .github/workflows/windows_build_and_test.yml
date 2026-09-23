@@ -54,8 +54,8 @@ jobs:
           uv python install 3.13
           uv venv .venv
 
-      - name: "Windows: Cache MOOSE and dependency builds"
-        uses: actions/cache@v4
+      - name: "Windows: Restore MOOSE cache"
+        uses: actions/cache/restore@v4
         id: moose-windows-cache
         with:
           path: |
@@ -72,6 +72,19 @@ jobs:
       - name: "Windows: Build MOOSE dependencies and Rabbit"
         run: |
           powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1
+
+      - name: "Windows: Save MOOSE cache"
+        if: steps.moose-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            moose/petsc/arch-windows-opt
+            moose/libmesh/installed
+            moose/framework/contrib/wasp/install
+            moose/framework/contrib/wasp/build
+            moose/framework/contrib/hit/hit.exe
+            moose/framework/include/base/MooseConfig.h
+          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**') }}
 
       - name: "Windows: Package standalone wheel and run tests"
         run: |

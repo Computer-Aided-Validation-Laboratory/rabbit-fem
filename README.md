@@ -166,12 +166,12 @@ This generates `dist/rabbit_fem-2026.9.0-py3-none-win_amd64.whl` (~56 MB, fully 
 #### Prerequisites (Linux)
 
 - **OS**: Linux x86_64 (Ubuntu 22.04+ or compatible)
-- **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`, `libtirpc-dev`, `libomp-dev`
+- **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`, `libtirpc-dev`, `libomp-dev`, `libglu1-mesa`
 - **Python**: Python 3.10+ with [`uv`](https://docs.astral.sh/uv/)
 
 ```bash
 sudo apt-get update && sudo apt-get install -y \
-    build-essential gfortran libopenmpi-dev openmpi-bin patchelf libtirpc-dev libomp-dev
+    build-essential gfortran libopenmpi-dev openmpi-bin patchelf libtirpc-dev libomp-dev libglu1-mesa
 
 # Set up Python environment
 uv venv .venv

@@ -35,7 +35,8 @@ jobs:
             openmpi-bin \
             patchelf \
             libtirpc-dev \
-            libomp-dev
+            libomp-dev \
+            libglu1-mesa
 
       - name: "Linux: Set up uv"
         uses: astral-sh/setup-uv@v5
@@ -53,8 +54,8 @@ jobs:
         run: |
           uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh
 
-      - name: "Linux: Cache MOOSE and dependency builds"
-        uses: actions/cache@v4
+      - name: "Linux: Restore MOOSE cache"
+        uses: actions/cache/restore@v4
         id: moose-cache
         with:
           path: |
@@ -70,6 +71,17 @@ jobs:
         if: steps.moose-cache.outputs.cache-hit != 'true'
         run: |
           uv run python build_rabbit.py --moose
+
+      - name: "Linux: Save MOOSE cache"
+        if: steps.moose-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            moose/petsc
+            moose/libmesh/installed
+            moose/framework/contrib/wasp/install
+            moose/framework/include/base/MooseConfig.h
+          key: linux-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
 
       - name: "Linux: Build Rabbit, stage artifacts, and build wheel"
         run: |
