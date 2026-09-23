@@ -102,12 +102,15 @@ Write-Host "[OK] Compiler wrappers configured in $WrappersDir" -ForegroundColor 
 # Helper function to run bash commands
 function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     Write-Host "`n>>> $StepTitle..." -ForegroundColor Cyan
-    $setupCmd = "export PATH=`"/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`" && cd `"$RepoRootPosix`" && "
-    $combined = $setupCmd + $BashCommand
+    $setupCmd = "export PATH=`"/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`"`ncd `"$RepoRootPosix`"`n"
+    $scriptContent = "set -e`n" + $setupCmd + $BashCommand + "`n"
+    $scriptFile = Join-Path $RepoRoot "_run_step.sh"
+    [System.IO.File]::WriteAllText($scriptFile, $scriptContent)
+
     $logFile = Join-Path $RepoRoot "last_step.log"
     if (Test-Path $logFile) { Remove-Item -Force $logFile }
 
-    & $MsysBash -lc "$combined 2>&1" | Tee-Object -FilePath $logFile
+    & $MsysBash -l "$RepoRootPosix/_run_step.sh" 2>&1 | Tee-Object -FilePath $logFile
     $code = $LASTEXITCODE
     if ($code -ne 0) {
         Write-Host "[!] $StepTitle FAILED with exit code $code" -ForegroundColor Red
@@ -116,18 +119,6 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
             Write-Host "`n--- LAST 150 LINES OF LOG ---" -ForegroundColor Red
             $tail | ForEach-Object { Write-Host $_ }
             Write-Host "--- END OF LOG ---`n" -ForegroundColor Red
-
-            try {
-                $pasteUrl = (Invoke-RestMethod -Uri "https://paste.rs" -Method Post -InFile $logFile -TimeoutSec 10).Trim()
-                Write-Host "[*] Full build log uploaded: $pasteUrl" -ForegroundColor Yellow
-                if ($env:GITHUB_STEP_SUMMARY) {
-                    Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### ❌ $StepTitle Failed (exit code $code)`n`n[View Full Build Log]($pasteUrl)`n`n``````text`n$($tail -join "`n")`n```````n"
-                }
-            } catch {
-                if ($env:GITHUB_STEP_SUMMARY) {
-                    Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### ❌ $StepTitle Failed (exit code $code)`n`n``````text`n$($tail -join "`n")`n```````n"
-                }
-            }
         }
         throw "$StepTitle failed with exit code $code."
     }
