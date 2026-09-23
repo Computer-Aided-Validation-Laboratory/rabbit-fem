@@ -123,7 +123,10 @@ if (-not (Test-Path $MoosePetscCfg) -or -not (Test-Path $MooseLibmeshCfg)) {
 
     $fixSymlinks = Join-Path $RepoRoot "moose\libmesh\contrib\bin\fix_windows_symlinks.sh"
     if (Test-Path $fixSymlinks) {
-        Invoke-MsysBash "cd moose/libmesh/contrib && sed -i 's/\$(shell git rev-parse --show-toplevel)/\$(git rev-parse --show-toplevel)/g' bin/fix_windows_symlinks.sh && ./bin/fix_windows_symlinks.sh" "Fixing libMesh Windows symlinks"
+        $symlinkScript = [System.IO.File]::ReadAllText($fixSymlinks)
+        $fixedScript = $symlinkScript.Replace('shell git rev-parse', 'git rev-parse')
+        [System.IO.File]::WriteAllText($fixSymlinks, $fixedScript)
+        Invoke-MsysBash "cd moose/libmesh/contrib && ./bin/fix_windows_symlinks.sh" "Fixing libMesh Windows symlinks"
     }
 }
 
