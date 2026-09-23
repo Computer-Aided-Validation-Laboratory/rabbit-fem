@@ -112,7 +112,7 @@ uv run python src/rabbit/examples/ex1_dogbone.py
 3. **MSYS2** (used strictly for Unix shell utilities and GNU Make needed by PETSc/libMesh/MOOSE configure and build scripts; compilation itself is handled by Zig):
    ```powershell
    winget install --id MSYS2.MSYS2 --source winget
-   C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make diffutils patch python m4
+   C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make diffutils patch python m4 git
    ```
 
 #### 1-Step Automated Windows Build

@@ -27,6 +27,13 @@ if (-not (Test-Path $MsysBash)) {
 }
 Write-Host "[OK] MSYS2 found at $MsysBash" -ForegroundColor Green
 
+$MsysGit = "C:\msys64\usr\bin\git.exe"
+if (-not (Test-Path $MsysGit)) {
+    Write-Host "[*] Installing git in MSYS2..." -ForegroundColor Yellow
+    & "C:\msys64\usr\bin\pacman.exe" -S --needed --noconfirm git
+}
+Write-Host "[OK] MSYS2 git verified." -ForegroundColor Green
+
 # 2. Check or create Python virtual environment with uv
 $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {

@@ -40,6 +40,7 @@ jobs:
             patch
             python
             m4
+            git
 
       - name: "Windows: Set up uv"
         uses: astral-sh/setup-uv@v5
