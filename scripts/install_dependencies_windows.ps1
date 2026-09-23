@@ -86,7 +86,8 @@ $wrappers = @(
     @{ Name = "zig-cc"; Script = "cc_wrapper.py" },
     @{ Name = "zig-cxx"; Script = "cxx_wrapper.py" },
     @{ Name = "zig-ar"; Script = "ar_wrapper.py" },
-    @{ Name = "zig-ranlib"; Script = "ranlib_wrapper.py" }
+    @{ Name = "zig-ranlib"; Script = "ranlib_wrapper.py" },
+    @{ Name = "lib"; Script = "ar_wrapper.py" }
 )
 foreach ($w in $wrappers) {
     $shPath = Join-Path $WrappersDir $w.Name
@@ -105,7 +106,7 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     $localLog = Join-Path $RepoRoot "current_step.log"
     if (Test-Path $localLog) { Remove-Item -Force $localLog }
 
-    $setupCmd = "export PATH=`"/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`" && cd `"$RepoRootPosix`" && "
+    $setupCmd = "export PATH=`"$RepoRootPosix/.zig_wrappers:/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`" && cd `"$RepoRootPosix`" && "
     $stepLog = "$RepoRootPosix/current_step.log"
     $combined = "set -o pipefail && ( " + $setupCmd + $BashCommand + " ) 2>&1 | tee " + $stepLog
     & $MsysBash -lc $combined
@@ -204,7 +205,7 @@ if (-not (Test-Path $LibMeshLib)) {
     $patchMetis = "cd moose/libmesh/contrib/metis/GKlib && sed -i 's/#include <sys\/resource.h>/#if !defined(_WIN32) \&\& !defined(__MINGW32__)\n  #include <sys\/resource.h>\n#endif/' gk_arch.h && sed -i 's/#if defined(USE_GKREGEX)/#if defined(USE_GKREGEX) || defined(_WIN32) || defined(__MINGW32__)/' GKlib.h && sed -i 's/__argc/argc/g; s/__argv/argv/g; s/__shortopts/shortopts/g; s/__longopts/longopts/g; s/__longind/longind/g' gk_getopt.h"
     Invoke-MsysBash $patchMetis "Patching METIS GKlib for MinGW"
 
-    $libmeshBuild = "cd moose/libmesh && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --with-petsc=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
+    $libmeshBuild = "cd moose/libmesh && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --with-petsc=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt --disable-fortran --disable-exodus-fortran && make -j$Jobs && make install"
     Invoke-MsysBash $libmeshBuild "Configuring and building libMesh"
 } else {
     Write-Host "[OK] libMesh already built at $LibMeshLib" -ForegroundColor Green

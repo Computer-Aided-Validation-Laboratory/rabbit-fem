@@ -22,6 +22,22 @@ def sanitize_ar_flags(arg: str) -> str:
 
 def transform_ar_args(args: List[str]) -> List[str]:
     """Transform MSYS2 ar arguments, unpacking response files if needed."""
+    # Handle MSVC lib syntax: lib -OUT:libname.a obj1.o obj2.o
+    out_lib = None
+    other_args: List[str] = []
+    is_msvc_lib = False
+    for a in args:
+        if a.upper().startswith(("-OUT:", "/OUT:")):
+            out_lib = a.split(":", 1)[1]
+            is_msvc_lib = True
+        elif a.startswith(("-nologo", "/nologo", "-NOLOGO", "/NOLOGO")):
+            is_msvc_lib = True
+            continue
+        else:
+            other_args.append(a)
+    if is_msvc_lib and out_lib:
+        args = ["cr", out_lib] + other_args
+
     result: List[str] = []
     for arg in args:
         if arg.startswith("@"):
