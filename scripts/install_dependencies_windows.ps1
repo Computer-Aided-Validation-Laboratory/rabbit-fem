@@ -162,14 +162,6 @@ if (-not $AllDepsBuilt -and (-not (Test-Path $MoosePetscCfg) -or -not (Test-Path
             $attempt++
         }
     }
-
-    $fixSymlinks = Join-Path $RepoRoot "moose\libmesh\contrib\bin\fix_windows_symlinks.sh"
-    if (Test-Path $fixSymlinks) {
-        $symlinkScript = [System.IO.File]::ReadAllText($fixSymlinks)
-        $fixedScript = $symlinkScript.Replace('shell git rev-parse', 'git rev-parse')
-        [System.IO.File]::WriteAllText($fixSymlinks, $fixedScript)
-        Invoke-MsysBash "cd moose/libmesh/contrib && ./bin/fix_windows_symlinks.sh" "Fixing libMesh Windows symlinks"
-    }
 }
 
 # 6. Build PETSc
@@ -184,6 +176,20 @@ if (-not (Test-Path $PetscLib)) {
 # 7. Build libMesh
 $LibMeshLib = Join-Path $RepoRoot "moose\libmesh\installed\lib\libmesh_opt.a"
 if (-not (Test-Path $LibMeshLib)) {
+    $fixSymlinks = Join-Path $RepoRoot "moose\libmesh\contrib\bin\fix_windows_symlinks.sh"
+    if (Test-Path $fixSymlinks) {
+        $symlinkScript = [System.IO.File]::ReadAllText($fixSymlinks)
+        $fixedScript = $symlinkScript.Replace('shell git rev-parse', 'git rev-parse')
+        $fixedScript = $fixedScript.Replace('rm "$sl"', 'rm -rf "$sl"')
+        $fixedScript = $fixedScript.Replace('$(cat $sl)', '$(tr -d ''\r\n'' < "$sl")')
+        [System.IO.File]::WriteAllText($fixSymlinks, $fixedScript)
+        Invoke-MsysBash "cd moose/libmesh/contrib && ./bin/fix_windows_symlinks.sh" "Fixing libMesh Windows symlinks"
+    }
+
+    # Ensure nested eigen symlink (eigen/eigen -> eigen/gitshim -> ../git/Eigen) is properly resolved
+    $fixEigen = "cd moose/libmesh/contrib && if [ -d eigen/git/Eigen ]; then rm -rf eigen/gitshim/Eigen eigen/gitshim/unsupported eigen/gitshim/root && cp -r eigen/git/Eigen eigen/gitshim/Eigen && cp -r eigen/git/unsupported eigen/gitshim/unsupported && cp -r eigen/git eigen/gitshim/root && rm -rf eigen/eigen && cp -r eigen/gitshim eigen/eigen; fi && test -f eigen/eigen/Eigen/Householder"
+    Invoke-MsysBash $fixEigen "Resolving and verifying Eigen headers for Windows"
+
     $libmeshBuild = "cd moose/libmesh && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --with-petsc=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
     Invoke-MsysBash $libmeshBuild "Configuring and building libMesh"
 } else {
