@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 
 def find_python_exe() -> str:
@@ -294,21 +295,33 @@ def build_moose_dependencies(
     )
     if not (petsc_cfg.is_file() and timpi_readme.is_file()):
         print("Initializing MOOSE git submodules (petsc, libmesh, wasp)...")
-        subprocess.run(
-            [
-                "git",
-                "submodule",
-                "update",
-                "--init",
-                "--recursive",
-                "petsc",
-                "libmesh",
-                "framework/contrib/wasp",
-                "framework/contrib/hit",
-            ],
-            cwd=str(moose_dir),
-            check=True,
-        )
+        submodule_cmd = [
+            "git",
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "petsc",
+            "libmesh",
+            "framework/contrib/wasp",
+            "framework/contrib/hit",
+        ]
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            try:
+                subprocess.run(
+                    submodule_cmd, cwd=str(moose_dir), check=True
+                )
+                break
+            except subprocess.CalledProcessError:
+                if attempt == max_attempts:
+                    raise
+                print(
+                    f"Submodule checkout failed (attempt {attempt}/"
+                    f"{max_attempts}). Waiting 30s before retry "
+                    "(GitLab load/rate limit backoff)..."
+                )
+                time.sleep(30)
 
     tool_env = dict(os.environ)
     tool_env["OMPI_CC"] = str(zigcc_path)

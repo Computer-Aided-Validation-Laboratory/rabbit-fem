@@ -131,7 +131,23 @@ if (-not (Test-Path $MooseFrameworkMk)) {
 }
 
 if (-not (Test-Path $MoosePetscCfg) -or -not (Test-Path $MooseLibmeshCfg)) {
-    Invoke-MsysBash "cd moose && git config core.autocrlf false && git submodule update --init --recursive petsc libmesh framework/contrib/wasp framework/contrib/hit" "Initializing MOOSE submodules at commit $MooseCommit"
+    $submoduleCmd = "cd moose && git config core.autocrlf false && git submodule update --init --recursive petsc libmesh framework/contrib/wasp framework/contrib/hit"
+    $maxAttempts = 5
+    $attempt = 1
+    $success = $false
+    while (-not $success -and $attempt -le $maxAttempts) {
+        try {
+            Invoke-MsysBash $submoduleCmd "Initializing MOOSE submodules at commit $MooseCommit (Attempt $attempt/$maxAttempts)"
+            $success = $true
+        } catch {
+            if ($attempt -ge $maxAttempts) {
+                throw $_
+            }
+            Write-Host "[!] Submodule update failed (transient remote/load error). Waiting 30s before retry..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 30
+            $attempt++
+        }
+    }
 
     $fixSymlinks = Join-Path $RepoRoot "moose\libmesh\contrib\bin\fix_windows_symlinks.sh"
     if (Test-Path $fixSymlinks) {
