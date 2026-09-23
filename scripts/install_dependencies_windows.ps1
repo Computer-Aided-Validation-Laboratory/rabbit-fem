@@ -27,13 +27,24 @@ if (-not (Test-Path $MsysBash)) {
 }
 Write-Host "[OK] MSYS2 found at $MsysBash" -ForegroundColor Green
 
-$MsysGit = "C:\msys64\usr\bin\git.exe"
-$MsysPython = "C:\msys64\usr\bin\python3.exe"
-if (-not (Test-Path $MsysGit) -or -not (Test-Path $MsysPython)) {
-    Write-Host "[*] Installing required MSYS2 packages (git, python)..." -ForegroundColor Yellow
-    & "C:\msys64\usr\bin\pacman.exe" -S --needed --noconfirm msys/git msys/python
+$requiredMsysTools = @("diff.exe", "make.exe", "patch.exe", "m4.exe", "git.exe", "python3.exe")
+$needsInstall = $false
+foreach ($tool in $requiredMsysTools) {
+    if (-not (Test-Path "C:\msys64\usr\bin\$tool")) {
+        $needsInstall = $true
+        break
+    }
 }
-Write-Host "[OK] MSYS2 git and python3 verified." -ForegroundColor Green
+if ($needsInstall) {
+    Write-Host "[*] Synchronizing MSYS2 database and installing required packages..." -ForegroundColor Yellow
+    & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python
+}
+foreach ($tool in $requiredMsysTools) {
+    if (-not (Test-Path "C:\msys64\usr\bin\$tool")) {
+        throw "Failed to install required MSYS2 tool C:\msys64\usr\bin\$tool."
+    }
+}
+Write-Host "[OK] MSYS2 required tools verified (diff, make, patch, m4, git, python3)." -ForegroundColor Green
 
 # 2. Check or create Python virtual environment with uv
 $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
