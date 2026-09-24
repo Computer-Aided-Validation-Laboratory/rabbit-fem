@@ -19,9 +19,11 @@ def posix_to_win(path: str) -> str:
     match = re.match(r"^/([a-zA-Z])/(.*)", path)
     if match:
         return f"{match.group(1).upper()}:/{match.group(2)}"
-    # Match flags like -I/c/foo, -L/d/foo, -isystem/c/foo, -Wl,-rpath,/d/foo
+    # Match flags with path values: -I, -L, -isystem, -iquote, -idirafter, etc.
     match_flag = re.match(
-        r"^(--?[a-zA-Z0-9_\-=,]+(?::|=)?)/([a-zA-Z])/(.*)", path
+        r"^(-(?:I|L|isystem|iquote|idirafter|Wl,-rpath(?:=|,)?)(?::|=)?)"
+        r"/([a-zA-Z])/(.*)",
+        path,
     )
     if match_flag:
         return (

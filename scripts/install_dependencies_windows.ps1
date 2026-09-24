@@ -128,6 +128,13 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
 
     if ($code -ne 0) {
         Write-Host "`n[!] $StepTitle FAILED with exit code $code" -ForegroundColor Red
+        foreach ($petscLog in @(Join-Path $RepoRoot "moose\petsc\configure.log", Join-Path $RepoRoot "moose\petsc\arch-windows-opt\lib\petsc\conf\configure.log")) {
+            if (Test-Path $petscLog) {
+                "`n--- PETSC CONFIGURE.LOG TAIL ---`n" | Out-File -FilePath $localLog -Append -Encoding utf8
+                Get-Content $petscLog -Tail 150 | Out-File -FilePath $localLog -Append -Encoding utf8
+                break
+            }
+        }
         if (Test-Path $localLog) {
             $tail = Get-Content $localLog -Tail 100
             Write-Host "`n--- LAST 100 LINES OF $StepTitle LOG ---" -ForegroundColor Red
@@ -243,7 +250,7 @@ $HitExe = Join-Path $RepoRoot "moose\framework\contrib\hit\hit.exe"
 if (-not (Test-Path $HitExe)) {
     # Patch WASP Format.h and waspcore/CMakeLists.txt for modern MinGW / Clang compatibility
     $patchWasp = @'
-cd moose/framework/contrib/wasp && sed -i 's/defined(__GNUC__)/defined(__GNUC__) && defined(_TWO_DIGIT_EXPONENT)/g' waspcore/Format.h && sed -i 's/\$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>/\$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> "\$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}\/..>"/g' waspcore/CMakeLists.txt
+cd moose/framework/contrib/wasp && sed -i 's/defined(__GNUC__)/defined(__GNUC__) && defined(_TWO_DIGIT_EXPONENT)/g' waspcore/Format.h && sed -i 's/"\$<BUILD_INTERFACE:\${CMAKE_CURRENT_SOURCE_DIR}>"/"\$<BUILD_INTERFACE:\${CMAKE_CURRENT_SOURCE_DIR}>"\n  "\$<BUILD_INTERFACE:\${CMAKE_CURRENT_SOURCE_DIR}\/..>"/g' waspcore/CMakeLists.txt && sed -i 's/PRIVATE/PUBLIC/g' waspcore/CMakeLists.txt
 '@
     Invoke-MsysBash $patchWasp "Patching WASP Format.h and CMakeLists.txt for MinGW"
 
