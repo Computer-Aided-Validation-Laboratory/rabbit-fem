@@ -36,7 +36,8 @@ def setup_toolchain_wrappers(repo_dir: Path) -> tuple[Path, Path]:
 
         return setup_darwin_toolchain(repo_dir)
     elif sys.platform == "win32":
-        # Windows uses PowerShell wrapper setup in install_dependencies_windows.ps1
+        # Windows uses PowerShell wrapper setup in
+        # install_dependencies_windows.ps1
         wrappers_dir = repo_dir / ".zig_wrappers"
         return wrappers_dir / "zig-cc", wrappers_dir / "zig-cxx"
     else:
@@ -45,13 +46,97 @@ def setup_toolchain_wrappers(repo_dir: Path) -> tuple[Path, Path]:
         return setup_linux_toolchain(repo_dir)
 
 
+def build_petsc_stage(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Dispatch PETSc compilation to OS-specific handler."""
+    if sys.platform == "darwin":
+        from scripts.build.darwin import build_petsc
+
+        build_petsc(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    elif sys.platform == "win32":
+        from scripts.build.windows import build_petsc
+
+        build_petsc(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    else:
+        from scripts.build.linux import build_petsc
+
+        build_petsc(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+
+
+def build_libmesh_stage(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Dispatch libMesh compilation to OS-specific handler."""
+    if sys.platform == "darwin":
+        from scripts.build.darwin import build_libmesh
+
+        build_libmesh(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    elif sys.platform == "win32":
+        from scripts.build.windows import build_libmesh
+
+        build_libmesh(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    else:
+        from scripts.build.linux import build_libmesh
+
+        build_libmesh(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+
+
+def build_wasp_stage(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Dispatch WASP compilation to OS-specific handler."""
+    if sys.platform == "darwin":
+        from scripts.build.darwin import build_wasp
+
+        build_wasp(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    elif sys.platform == "win32":
+        from scripts.build.windows import build_wasp
+
+        build_wasp(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    else:
+        from scripts.build.linux import build_wasp
+
+        build_wasp(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+
+
+def configure_moose_stage(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Dispatch MOOSE configure to OS-specific handler."""
+    if sys.platform == "darwin":
+        from scripts.build.darwin import configure_moose
+
+        configure_moose(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    elif sys.platform == "win32":
+        from scripts.build.windows import configure_moose
+
+        configure_moose(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    else:
+        from scripts.build.linux import configure_moose
+
+        configure_moose(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+
+
 def build_dependencies(
     repo_dir: Path,
     moose_dir: Path,
     zigcc_path: Path,
     zigcxx_path: Path,
 ) -> None:
-    """Dispatch dependency compilation to OS-specific handler."""
+    """Dispatch full dependency compilation to OS-specific handler."""
     if sys.platform == "darwin":
         from scripts.build.darwin import build_darwin_dependencies
 
@@ -75,6 +160,26 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line flags for build_rabbit."""
     parser = argparse.ArgumentParser(
         description="Unified build orchestrator for rabbit-fem."
+    )
+    parser.add_argument(
+        "--build-petsc",
+        action="store_true",
+        help="Build only upstream PETSc dependency stage.",
+    )
+    parser.add_argument(
+        "--build-libmesh",
+        action="store_true",
+        help="Build only upstream libMesh dependency stage.",
+    )
+    parser.add_argument(
+        "--build-wasp",
+        action="store_true",
+        help="Build only upstream WASP and HIT dependency stage.",
+    )
+    parser.add_argument(
+        "--configure-moose",
+        action="store_true",
+        help="Run only MOOSE framework configuration stage.",
     )
     parser.add_argument(
         "--moose",
@@ -139,7 +244,18 @@ def main() -> None:
         return
 
     # If only tests requested
-    if args.test and not (args.moose or args.wheel or args.all):
+    if (
+        args.test
+        and not (
+            args.moose
+            or args.wheel
+            or args.all
+            or args.build_petsc
+            or args.build_libmesh
+            or args.build_wasp
+            or args.configure_moose
+        )
+    ):
         run_tests(repo_dir)
         return
 
@@ -155,7 +271,26 @@ def main() -> None:
         custom_moose = args.moose
     moose_dir = get_moose_dir(repo_dir, custom_moose)
 
-    # 2. If --moose or --all requested, build MOOSE dependencies
+    # 2. Discrete dependency stages
+    if args.build_petsc:
+        build_petsc_stage(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+        return
+
+    if args.build_libmesh:
+        build_libmesh_stage(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+        return
+
+    if args.build_wasp:
+        build_wasp_stage(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+        return
+
+    if args.configure_moose:
+        configure_moose_stage(
+            repo_dir, moose_dir, zigcc_path, zigcxx_path
+        )
+        return
+
+    # 3. If --moose or --all requested, build all MOOSE dependencies
     if args.moose is not None or args.all:
         build_dependencies(
             repo_dir, moose_dir, zigcc_path, zigcxx_path
@@ -163,17 +298,17 @@ def main() -> None:
         if args.moose is not None and not args.all and not args.wheel:
             return
 
-    # 3. Build and Stage Rabbit
+    # 4. Build and Stage Rabbit
     binary_path = build_rabbit_binary(
         repo_dir, moose_dir, zigcc_path, zigcxx_path
     )
     stage_artifacts(repo_dir, moose_dir, binary_path)
 
-    # 4. Build wheel package if requested
+    # 5. Build wheel package if requested
     if args.wheel or args.all:
         build_wheel(repo_dir)
 
-    # 5. Run test suite if requested
+    # 6. Run test suite if requested
     if args.test or args.all:
         run_tests(repo_dir)
 

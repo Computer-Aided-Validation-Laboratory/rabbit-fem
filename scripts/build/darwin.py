@@ -51,22 +51,11 @@ def setup_darwin_toolchain(repo_dir: Path) -> tuple[Path, Path]:
     return zigcc_path, zigcxx_path
 
 
-def build_darwin_dependencies(
-    repo_dir: Path,
-    moose_dir: Path,
+def get_darwin_tool_env(
     zigcc_path: Path,
     zigcxx_path: Path,
-) -> None:
-    """Build PETSc, libMesh, WASP, and configure MOOSE on macOS."""
-    jobs = os.environ.get("MOOSE_JOBS", str(os.cpu_count() or 4))
-    print("=" * 60)
-    print(f" Setting up MOOSE and dependencies (macOS) at: {moose_dir}")
-    print(f" Parallel jobs: {jobs}")
-    print("=" * 60)
-
-    ensure_moose_repo(repo_dir, moose_dir)
-    ensure_moose_submodules(moose_dir)
-
+) -> dict[str, str]:
+    """Prepare environment variables for building macOS dependencies."""
     tool_env = dict(os.environ)
     tool_env["OMPI_CC"] = str(zigcc_path)
     tool_env["OMPI_CXX"] = str(zigcxx_path)
@@ -125,28 +114,18 @@ def build_darwin_dependencies(
         + os.environ.get("CPPFLAGS", "")
     ).strip()
     tool_env["CPPFLAGS"] = cppflags
+    return tool_env
 
-    # 1. Build PETSc (disabling unused GPU and heavy packages)
-    print("--> Building PETSc...")
-    petsc_env = dict(tool_env)
-    petsc_env.pop("PETSC_DIR", None)
-    petsc_env.pop("PETSC_ARCH", None)
-    petsc_cmd = [
-        "./scripts/update_and_rebuild_petsc.sh",
-        "--skip-submodule-update",
-        "--CXXOPTFLAGS=-O3",
-        "--COPTFLAGS=-O3",
-        "--FOPTFLAGS=-O3",
-        "--download-strumpack=0",
-        "--with-strumpack=0",
-        "--download-kokkos=0",
-        "--with-kokkos=0",
-        "--download-kokkos-kernels=0",
-        "--with-kokkos-kernels=0",
-        "--download-libceed=0",
-        "--with-libceed=0",
-        "--download-umpire=0",
-        "--with-umpire=0",
+
+def build_petsc(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build PETSc dependency on macOS."""
+    ensure_moose_repo(repo_dir, moose_dir)
+    ensure_moose_submodules(moose_dir)
     petsc_built = (
         (
             moose_dir / "petsc" / "arch-moose" / "lib" / "libpetsc.dylib"
@@ -157,6 +136,27 @@ def build_darwin_dependencies(
         or (moose_dir / "petsc" / "lib" / "libpetsc.dylib").is_file()
     )
     if not petsc_built:
+        print("--> Building PETSc...")
+        petsc_env = get_darwin_tool_env(zigcc_path, zigcxx_path)
+        petsc_env.pop("PETSC_DIR", None)
+        petsc_env.pop("PETSC_ARCH", None)
+        petsc_cmd = [
+            "./scripts/update_and_rebuild_petsc.sh",
+            "--skip-submodule-update",
+            "--CXXOPTFLAGS=-O3",
+            "--COPTFLAGS=-O3",
+            "--FOPTFLAGS=-O3",
+            "--download-strumpack=0",
+            "--with-strumpack=0",
+            "--download-kokkos=0",
+            "--with-kokkos=0",
+            "--download-kokkos-kernels=0",
+            "--with-kokkos-kernels=0",
+            "--download-libceed=0",
+            "--with-libceed=0",
+            "--download-umpire=0",
+            "--with-umpire=0",
+        ]
         subprocess.run(
             petsc_cmd,
             cwd=str(moose_dir),
@@ -166,14 +166,25 @@ def build_darwin_dependencies(
     else:
         print("[OK] PETSc already built.")
 
-    # 2. Build libMesh
+
+def build_libmesh(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build libMesh dependency on macOS."""
+    ensure_moose_repo(repo_dir, moose_dir)
+    ensure_moose_submodules(moose_dir)
     libmesh_lib = (
         moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.dylib"
     )
-    libmesh_a = moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.a"
+    libmesh_a = (
+        moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.a"
+    )
     if not (libmesh_lib.is_file() or libmesh_a.is_file()):
         print("--> Building libMesh with OpenMPI toolchain...")
-        libmesh_env = dict(tool_env)
+        libmesh_env = get_darwin_tool_env(zigcc_path, zigcxx_path)
         libmesh_env["METHODS"] = "opt"
         subprocess.run(
             [
@@ -187,10 +198,20 @@ def build_darwin_dependencies(
     else:
         print("[OK] libMesh already built.")
 
-    # 3. Build WASP
+
+def build_wasp(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build WASP and HIT parser on macOS."""
+    ensure_moose_repo(repo_dir, moose_dir)
+    ensure_moose_submodules(moose_dir)
     wasp_install = moose_dir / "framework" / "contrib" / "wasp" / "install"
     if not (wasp_install / "lib").is_dir():
         print("--> Building WASP parser...")
+        tool_env = get_darwin_tool_env(zigcc_path, zigcxx_path)
         subprocess.run(
             ["./scripts/update_and_rebuild_wasp.sh"],
             cwd=str(moose_dir),
@@ -200,10 +221,21 @@ def build_darwin_dependencies(
     else:
         print("[OK] WASP parser already built.")
 
-    # 4. Configure MOOSE
-    moose_cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+
+def configure_moose(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Configure MOOSE framework on macOS."""
+    ensure_moose_repo(repo_dir, moose_dir)
+    moose_cfg = (
+        moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    )
     if not moose_cfg.is_file():
         print("--> Configuring MOOSE...")
+        tool_env = get_darwin_tool_env(zigcc_path, zigcxx_path)
         subprocess.run(
             ["./configure", "--with-derivative-size=89"],
             cwd=str(moose_dir),
@@ -212,6 +244,25 @@ def build_darwin_dependencies(
         )
     else:
         print("[OK] MOOSE framework already configured.")
+
+
+def build_darwin_dependencies(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build all MOOSE dependencies sequentially on macOS."""
+    jobs = os.environ.get("MOOSE_JOBS", str(os.cpu_count() or 4))
+    print("=" * 60)
+    print(f" Setting up MOOSE and dependencies (macOS) at: {moose_dir}")
+    print(f" Parallel jobs: {jobs}")
+    print("=" * 60)
+
+    build_petsc(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    build_libmesh(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    build_wasp(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    configure_moose(repo_dir, moose_dir, zigcc_path, zigcxx_path)
 
     print("=" * 60)
     print(" MOOSE macOS dependencies built and configured successfully!")

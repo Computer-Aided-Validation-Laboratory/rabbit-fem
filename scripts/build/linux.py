@@ -168,22 +168,11 @@ def setup_linux_toolchain(repo_dir: Path) -> tuple[Path, Path]:
     return zigcc_path, zigcxx_path
 
 
-def build_linux_dependencies(
-    repo_dir: Path,
-    moose_dir: Path,
+def get_linux_tool_env(
     zigcc_path: Path,
     zigcxx_path: Path,
-) -> None:
-    """Build PETSc, libMesh, WASP, and configure MOOSE on Linux."""
-    jobs = os.environ.get("MOOSE_JOBS", str(os.cpu_count() or 4))
-    print("=" * 60)
-    print(f" Setting up MOOSE and dependencies (Linux) at: {moose_dir}")
-    print(f" Parallel jobs: {jobs}")
-    print("=" * 60)
-
-    ensure_moose_repo(repo_dir, moose_dir)
-    ensure_moose_submodules(moose_dir)
-
+) -> dict[str, str]:
+    """Prepare environment variables for building Linux dependencies."""
     tool_env = dict(os.environ)
     tool_env["OMPI_CC"] = str(zigcc_path)
     tool_env["OMPI_CXX"] = str(zigcxx_path)
@@ -198,8 +187,18 @@ def build_linux_dependencies(
         "/usr/lib/x86_64-linux-gnu:"
         + os.environ.get("LIBRARY_PATH", "")
     )
+    return tool_env
 
-    # 1. Build PETSc
+
+def build_petsc(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build PETSc dependency on Linux."""
+    ensure_moose_repo(repo_dir, moose_dir)
+    ensure_moose_submodules(moose_dir)
     petsc_built = (
         (moose_dir / "petsc" / "arch-moose" / "lib" / "libpetsc.so").is_file()
         or (
@@ -209,7 +208,7 @@ def build_linux_dependencies(
     )
     if not petsc_built:
         print("--> Building PETSc...")
-        petsc_env = dict(tool_env)
+        petsc_env = get_linux_tool_env(zigcc_path, zigcxx_path)
         petsc_env.pop("PETSC_DIR", None)
         petsc_env.pop("PETSC_ARCH", None)
         subprocess.run(
@@ -227,12 +226,25 @@ def build_linux_dependencies(
     else:
         print("[OK] PETSc already built.")
 
-    # 2. Build libMesh
-    libmesh_lib = moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.so"
-    libmesh_a = moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.a"
+
+def build_libmesh(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build libMesh dependency on Linux."""
+    ensure_moose_repo(repo_dir, moose_dir)
+    ensure_moose_submodules(moose_dir)
+    libmesh_lib = (
+        moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.so"
+    )
+    libmesh_a = (
+        moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.a"
+    )
     if not (libmesh_lib.is_file() or libmesh_a.is_file()):
         print("--> Building libMesh with Zig toolchain...")
-        libmesh_env = dict(tool_env)
+        libmesh_env = get_linux_tool_env(zigcc_path, zigcxx_path)
         libmesh_env["METHODS"] = "opt"
         subprocess.run(
             [
@@ -246,10 +258,20 @@ def build_linux_dependencies(
     else:
         print("[OK] libMesh already built.")
 
-    # 3. Build WASP
+
+def build_wasp(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build WASP and HIT parser on Linux."""
+    ensure_moose_repo(repo_dir, moose_dir)
+    ensure_moose_submodules(moose_dir)
     wasp_install = moose_dir / "framework" / "contrib" / "wasp" / "install"
     if not (wasp_install / "lib").is_dir():
         print("--> Building WASP parser...")
+        tool_env = get_linux_tool_env(zigcc_path, zigcxx_path)
         subprocess.run(
             ["./scripts/update_and_rebuild_wasp.sh"],
             cwd=str(moose_dir),
@@ -259,10 +281,21 @@ def build_linux_dependencies(
     else:
         print("[OK] WASP parser already built.")
 
-    # 4. Configure MOOSE
-    moose_cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+
+def configure_moose(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Configure MOOSE framework on Linux."""
+    ensure_moose_repo(repo_dir, moose_dir)
+    moose_cfg = (
+        moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    )
     if not moose_cfg.is_file():
         print("--> Configuring MOOSE...")
+        tool_env = get_linux_tool_env(zigcc_path, zigcxx_path)
         subprocess.run(
             ["./configure", "--with-derivative-size=89"],
             cwd=str(moose_dir),
@@ -271,6 +304,25 @@ def build_linux_dependencies(
         )
     else:
         print("[OK] MOOSE framework already configured.")
+
+
+def build_linux_dependencies(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build all MOOSE dependencies sequentially on Linux."""
+    jobs = os.environ.get("MOOSE_JOBS", str(os.cpu_count() or 4))
+    print("=" * 60)
+    print(f" Setting up MOOSE and dependencies (Linux) at: {moose_dir}")
+    print(f" Parallel jobs: {jobs}")
+    print("=" * 60)
+
+    build_petsc(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    build_libmesh(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    build_wasp(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    configure_moose(repo_dir, moose_dir, zigcc_path, zigcxx_path)
 
     print("=" * 60)
     print(" MOOSE Linux dependencies built and configured successfully!")
