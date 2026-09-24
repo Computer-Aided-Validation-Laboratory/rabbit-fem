@@ -198,13 +198,11 @@ $AllDepsBuilt = (Test-Path $PetscLib) -and (Test-Path $LibMeshLib) -and (Test-Pa
 if (-not (Test-Path $MooseFrameworkMk)) {
     if (-not (Test-Path $MooseDir)) {
         Invoke-MsysBash "git init moose && cd moose && git remote add origin https://github.com/idaholab/moose.git && git fetch --depth 1 origin $MooseCommit && git checkout FETCH_HEAD" "Fetching MOOSE repository at commit $MooseCommit"
-    } else {
-        Invoke-MsysBash "rm -rf .moose_framework_tmp && git init .moose_framework_tmp && cd .moose_framework_tmp && git remote add origin https://github.com/idaholab/moose.git && git fetch --depth 1 origin $MooseCommit && git checkout FETCH_HEAD && cp -rn . ../moose/ 2>/dev/null || true && cp -r .git ../moose/ 2>/dev/null || true && cd .. && rm -rf .moose_framework_tmp" "Overlaying MOOSE framework at commit $MooseCommit"
     }
 }
 
 $needPetsc = -not (Test-Path $PetscLib) -and -not (Test-Path $MoosePetscCfg)
-$needLibmesh = -not (Test-Path $LibMeshLib) -and -not (Test-Path (Join-Path $MooseDir "libmesh\contrib\timpi\README"))
+$needLibmesh = -not (Test-Path $LibMeshLib) -and -not (Test-Path (Join-Path $MooseDir "libmesh\installed\include\libmesh\libmesh.h"))
 $needWasp = -not (Test-Path $HitExe) -and -not (Test-Path (Join-Path $MooseDir "framework\contrib\wasp\CMakeLists.txt"))
 
 $subsNeeded = @()
