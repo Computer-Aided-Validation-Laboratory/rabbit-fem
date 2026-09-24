@@ -430,14 +430,20 @@ def build_moose_dependencies(
     petsc_env = dict(tool_env)
     petsc_env.pop("PETSC_DIR", None)
     petsc_env.pop("PETSC_ARCH", None)
+    petsc_cmd = [
+        "./scripts/update_and_rebuild_petsc.sh",
+        "--skip-submodule-update",
+        "--CXXOPTFLAGS=-O3",
+        "--COPTFLAGS=-O3",
+        "--FOPTFLAGS=-O3",
+    ]
+    if sys.platform == "darwin":
+        petsc_cmd.extend([
+            "--download-strumpack=0",
+            "--with-strumpack=0",
+        ])
     subprocess.run(
-        [
-            "./scripts/update_and_rebuild_petsc.sh",
-            "--skip-submodule-update",
-            "--CXXOPTFLAGS=-O3",
-            "--COPTFLAGS=-O3",
-            "--FOPTFLAGS=-O3",
-        ],
+        petsc_cmd,
         cwd=str(moose_dir),
         env=petsc_env,
         check=True,
