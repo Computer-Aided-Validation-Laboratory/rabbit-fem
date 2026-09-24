@@ -121,6 +121,16 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
         print(
             "Initializing MOOSE git submodules (petsc, libmesh, wasp)..."
         )
+        subprocess.run(
+            ["git", "submodule", "sync", "--recursive"],
+            cwd=str(moose_dir),
+            check=False,
+        )
+        subprocess.run(
+            ["git", "submodule", "init"],
+            cwd=str(moose_dir),
+            check=False,
+        )
         submodule_cmd = [
             "git",
             "submodule",
