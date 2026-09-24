@@ -14,8 +14,8 @@ permissions:
 jobs:
   macos-build-and-test:
     name: "macOS: Build Wheel and Test"
-    runs-on: macos-14
-    timeout-minutes: 180
+    runs-on: macos-15
+    timeout-minutes: 300
 
     steps:
       - name: "macOS: Checkout repository"
@@ -25,14 +25,16 @@ jobs:
           fetch-depth: 0
 
       - name: "macOS: Install system packages"
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
-          brew update
           brew install \
             open-mpi \
             gcc \
             llvm \
             libomp \
-            pkg-config \
+            pkgconf \
             cmake
 
       - name: "macOS: Set up uv"

@@ -61,6 +61,22 @@ This document details all unified patch files stored in [`patches/windows/`](fil
 
 ---
 
+## 4. MOOSE Framework (`patches/windows/moose.patch`)
+
+- **Target Component**: `moose`
+- **Files Modified**:
+  - `framework/moose.mk`
+- **Origin**: **Windows CI** ([Run #35980313025](https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/runs/35980313025) on commit `f1e3357`).
+- **What it does**:
+  1. On Windows (`$(findstring NT,$(shell uname))`):
+     - Stubs the build rule for `pycapabilities` (`_pycapabilities.so`/`.pyd`) by creating the destination directory and touching the target file.
+     - Builds the HIT parser and library via `cd $(HIT_DIR) && $(MAKE)` and touches `$(pyhit_LIB)`.
+- **Why it is needed**:
+  1. In MSYS2, `python3-config` resolves to MSYS2 POSIX Python (`/usr/bin/python3-config`), which pulls in `/usr/include/python3.12/Python.h` and `<sys/select.h>`. When compiling with Zig targeting Windows GNU (`x86_64-windows-gnu`), `<sys/select.h>` is unavailable in the Windows C runtime, causing `_pycapabilities.so` compilation to fail with `fatal error: 'sys/select.h' file not found`.
+  2. `_pycapabilities` and `pyhit_LIB` are Python C extensions intended for MOOSE internal test harness scripts and are neither linked into `rabbit-opt.exe` nor packaged into Rabbit distribution wheels. Stubbing them on Windows allows the core simulation engine and application binary to build and link cleanly without POSIX Python runtime conflicts.
+
+---
+
 ## Patch Management
 
 All patches are applied automatically in [`scripts/install_dependencies_windows.ps1`](file:///home/lloydf/rabbit-fem/scripts/install_dependencies_windows.ps1) using MSYS2 `patch`:
@@ -74,4 +90,8 @@ cd moose/libmesh/contrib/metis/GKlib && patch -p1 -N -r - < "$RepoRootPosix/patc
 
 # WASP
 cd moose/framework/contrib/wasp && patch -p1 -N -r - < "$RepoRootPosix/patches/windows/wasp.patch"
+
+# MOOSE Framework
+cd moose && patch -p1 -N -r - < "$RepoRootPosix/patches/windows/moose.patch"
 ```
+

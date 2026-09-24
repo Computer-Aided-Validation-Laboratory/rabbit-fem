@@ -129,7 +129,11 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
 
     if ($code -ne 0) {
         Write-Host "`n[!] $StepTitle FAILED with exit code $code" -ForegroundColor Red
-        foreach ($petscLog in @(Join-Path $RepoRoot "moose\petsc\configure.log", Join-Path $RepoRoot "moose\petsc\arch-windows-opt\lib\petsc\conf\configure.log")) {
+        $possibleLogs = @(
+            (Join-Path $RepoRoot "moose\petsc\configure.log"),
+            (Join-Path $RepoRoot "moose\petsc\arch-windows-opt\lib\petsc\conf\configure.log")
+        )
+        foreach ($petscLog in $possibleLogs) {
             if (Test-Path $petscLog) {
                 "`n--- PETSC CONFIGURE.LOG TAIL ---`n" | Out-File -FilePath $localLog -Append -Encoding utf8
                 Get-Content $petscLog -Tail 150 | Out-File -FilePath $localLog -Append -Encoding utf8
@@ -261,6 +265,10 @@ if (-not (Test-Path $HitExe)) {
 # 9. Configure MOOSE
 $MooseConfig = Join-Path $RepoRoot "moose\framework\include\base\MooseConfig.h"
 if (-not (Test-Path $MooseConfig)) {
+    # Apply Windows patch for MOOSE framework
+    $applyMoose = "cd moose && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/moose.patch`""
+    Invoke-MsysBash $applyMoose "Applying MOOSE Windows patch"
+
     $mooseConf = "cd moose && ./configure --with-derivative-size=89"
     Invoke-MsysBash $mooseConf "Configuring MOOSE framework"
 } else {

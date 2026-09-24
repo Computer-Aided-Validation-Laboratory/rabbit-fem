@@ -1,0 +1,30 @@
+--- a/framework/moose.mk
++++ b/framework/moose.mk
+@@ -221,6 +221,19 @@
+ pyhit_LIB          := $(HIT_DIR)/hit.$(PYMOD_EXTENSION)
+ pyhit_COMPILEFLAGS += $(PYMOD_COMPILEFLAGS) $(wasp_CXXFLAGS) $(wasp_LDFLAGS)
+ 
++ifeq ($(findstring NT,$(shell uname)),NT)
++hit $(pyhit_LIB) $(hit_CLI): $(pyhit_srcfiles) $(hit_CLI_srcfiles)
++	@echo "Building HIT on Windows..."
++	@bash -c '(cd "$(HIT_DIR)" && $(MAKE))'
++	@touch $(pyhit_LIB)
++
++pycapabilities_LIBNAME      := _pycapabilities.$(PYMOD_EXTENSION)
++pycapabilities_LIB          := $(PYCAPABILITIES_DIR)/$(pycapabilities_LIBNAME)
++pycapabilities $(pycapabilities_LIB) :
++	@echo "Skipping pycapabilities on Windows..."
++	@mkdir -p $(PYCAPABILITIES_DIR)
++	@touch $(pycapabilities_LIB)
++else
+ hit $(pyhit_LIB) $(hit_CLI): $(pyhit_srcfiles) $(hit_CLI_srcfiles)
+ 	@echo "Building and linking $(pyhit_LIB)..."
+ 	@bash -c '(cd "$(HIT_DIR)" && $(libmesh_CXX) $(CXXFLAGS) -I$(HIT_DIR)/include -std=c++17 -w -fPIC -lstdc++ -shared $^ $(pyhit_COMPILEFLAGS) $(DYNAMIC_LOOKUP) -o $(pyhit_LIB) $(hit_pad_LDFLAGS))'
+@@ -234,6 +247,7 @@
+ pycapabilities $(pycapabilities_LIB) : $(pycapabilities_srcfiles)
+ 	@echo "Building and linking $(pycapabilities_LIB)..."
+ 	@bash -c '(cd "$(PYCAPABILITIES_DIR)" && $(libmesh_UNDERLYING_CXX) -DFOR_PYCAPABILITIES -DMOOSESTRINGUTILS_NO_LIBMESH -std=c++17 -w -fPIC -lstdc++ -shared $(pycapabilities_srcfiles) $(pycapabilities_COMPILEFLAGS) $(pycapabilities_LDFLAGS) $(LDFLAGS) -o $(pycapabilities_LIB))'
++endif
+ 
+ #
+ # gtest
