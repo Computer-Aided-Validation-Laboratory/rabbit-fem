@@ -77,7 +77,7 @@ jobs:
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
             moose/framework/include/base/MooseConfig.h
-          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**') }}
+          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
 
       - name: "Windows: Build MOOSE dependencies and Rabbit"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
@@ -95,7 +95,7 @@ jobs:
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
             moose/framework/include/base/MooseConfig.h
-          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**') }}
+          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
 
       - name: "Windows: Package standalone wheel"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
@@ -113,7 +113,7 @@ jobs:
           path: |
             dist
             src/rabbit/bin
-          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'build_rabbit.py', 'patches/**') }}
 
       - name: "Windows: Upload wheel artifact"
         uses: actions/upload-artifact@v4
