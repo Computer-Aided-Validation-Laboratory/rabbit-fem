@@ -59,6 +59,31 @@ def transform_args(args: List[str]) -> List[str]:
         if flag not in result:
             result.append(flag)
 
+    is_linking = not any(
+        a in (
+            "-c",
+            "-E",
+            "-S",
+            "-M",
+            "-MM",
+            "-v",
+            "--version",
+            "-dumpversion",
+            "-dumpmachine",
+        )
+        for a in args
+    )
+    if is_linking:
+        for sys_lib in (
+            "-lws2_32",
+            "-lcrypt32",
+            "-lshlwapi",
+            "-liphlpapi",
+            "-lpsapi",
+        ):
+            if sys_lib not in result:
+                result.append(sys_lib)
+
     return result
 
 

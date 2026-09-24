@@ -624,10 +624,15 @@ def build_wheel(repo_dir: Path) -> Path:
             wheel_bin = shutil.which("wheel") or str(
                 repo_dir / ".venv" / "bin" / "wheel"
             )
+        wheel_cmd = (
+            [wheel_bin]
+            if (shutil.which(wheel_bin) or Path(wheel_bin).is_file())
+            else [find_python_exe(), "-m", "wheel"]
+        )
         print(f"--> Retagging wheel for platform: {platform_tag}")
         subprocess.run(
-            [
-                wheel_bin,
+            wheel_cmd
+            + [
                 "tags",
                 f"--platform-tag={platform_tag}",
                 "--remove",

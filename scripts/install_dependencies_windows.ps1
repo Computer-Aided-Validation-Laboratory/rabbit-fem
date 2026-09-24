@@ -57,7 +57,7 @@ Write-Host "[OK] Python environment: $VenvPython" -ForegroundColor Green
 
 # 3. Install required Python packages
 Write-Host "[*] Installing Python build and test dependencies..." -ForegroundColor Yellow
-& uv pip install --python $VenvPython ziglang packaging pyyaml jinja2 pytest gmsh
+& uv pip install --python $VenvPython ziglang packaging pyyaml jinja2 pytest gmsh wheel
 Write-Host "[OK] Python dependencies installed." -ForegroundColor Green
 
 # 4. Check Zig compiler
@@ -104,13 +104,39 @@ Write-Host "[OK] Compiler wrappers configured in $WrappersDir" -ForegroundColor 
 function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     Write-Host "`n>>> $StepTitle..." -ForegroundColor Cyan
     $localLog = Join-Path $RepoRoot "current_step.log"
+    $lastLog = Join-Path $RepoRoot "last_step.log"
     if (Test-Path $localLog) { Remove-Item -Force $localLog }
 
-    $setupCmd = "export PATH=`"$RepoRootPosix/.zig_wrappers:/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`" && cd `"$RepoRootPosix`" && "
-    $stepLog = "$RepoRootPosix/current_step.log"
-    $combined = "set -o pipefail && ( " + $setupCmd + $BashCommand + " ) 2>&1 | tee " + $stepLog
-    & $MsysBash -lc $combined
+    $stepScript = Join-Path $RepoRoot "run_step.sh"
+    $stepScriptPosix = "$RepoRootPosix/run_step.sh"
+    $exitCodeFile = Join-Path $RepoRoot "step_exit_code.txt"
+    $exitCodePosix = "$RepoRootPosix/step_exit_code.txt"
+    if (Test-Path $exitCodeFile) { Remove-Item -Force $exitCodeFile }
+
+    $scriptContent = "#!/usr/bin/env bash`n" +
+        "export PATH=`"$RepoRootPosix/.zig_wrappers:/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`"`n" +
+        "cd `"$RepoRootPosix`"`n" +
+        "trap 'echo `$? > `"$exitCodePosix`"' EXIT`n" +
+        "set -e`n" +
+        $BashCommand + "`n" +
+        "trap - EXIT`n" +
+        "echo 0 > `"$exitCodePosix`"`n"
+    [System.IO.File]::WriteAllText($stepScript, $scriptContent)
+
+    & $MsysBash $stepScriptPosix 2>&1 | Tee-Object -FilePath $localLog
     $code = $LASTEXITCODE
+
+    if (Test-Path $exitCodeFile) {
+        $fileCode = (Get-Content $exitCodeFile -Raw).Trim()
+        if ($fileCode -match '^\d+$') {
+            $code = [int]$fileCode
+        }
+    }
+
+    if (Test-Path $localLog) {
+        Copy-Item $localLog $lastLog -Force
+    }
+
     if ($code -ne 0) {
         Write-Host "`n[!] $StepTitle FAILED with exit code $code" -ForegroundColor Red
         if (Test-Path $localLog) {
@@ -248,10 +274,16 @@ if (-not (Test-Path $MooseConfig)) {
 # 10. Build Rabbit
 $RabbitExe = Join-Path $RepoRoot "rabbit-$Method.exe"
 Write-Host "`n[*] Building Rabbit application (rabbit-$Method.exe)..." -ForegroundColor Yellow
-$rabbitBuild = "make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a 2>&1 | tee make.log && if [ -f .libs/rabbit-$Method.exe ]; then cp .libs/rabbit-$Method.exe rabbit-$Method.exe; elif [ -f .libs/rabbit-$Method ]; then cp .libs/rabbit-$Method rabbit-$Method.exe; elif [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
+$rabbitBuild = "make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a && if [ -f .libs/rabbit-$Method.exe ]; then cp .libs/rabbit-$Method.exe rabbit-$Method.exe; elif [ -f .libs/rabbit-$Method ]; then cp .libs/rabbit-$Method rabbit-$Method.exe; elif [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
 Invoke-MsysBash $rabbitBuild "Compiling and linking Rabbit"
 
 if (-not (Test-Path $RabbitExe)) {
+    Write-Host "`n[!] $RabbitExe not found. Searching for rabbit binaries..." -ForegroundColor Red
+    Get-ChildItem -Path $RepoRoot -Filter "rabbit*" | ForEach-Object { Write-Host "  $($_.FullName)" }
+    $libsDir = Join-Path $RepoRoot ".libs"
+    if (Test-Path $libsDir) {
+        Get-ChildItem -Path $libsDir -Filter "rabbit*" | ForEach-Object { Write-Host "  $($_.FullName)" }
+    }
     throw "Expected binary $RabbitExe was not generated."
 }
 Write-Host "`n============================================================" -ForegroundColor Green

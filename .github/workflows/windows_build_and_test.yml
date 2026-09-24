@@ -141,9 +141,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $logPath = $null
-          if (Test-Path "make.log") { $logPath = "make.log" }
+          if (Test-Path "last_step.log") { $logPath = "last_step.log" }
           elseif (Test-Path "current_step.log") { $logPath = "current_step.log" }
-          elseif (Test-Path "last_step.log") { $logPath = "last_step.log" }
+          elseif (Test-Path "make.log") { $logPath = "make.log" }
           else {
             $found = Get-ChildItem -Path . -Filter "*step*.log" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($found) { $logPath = $found.FullName }
