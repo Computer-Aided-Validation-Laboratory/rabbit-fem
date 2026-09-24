@@ -369,8 +369,11 @@ def build_moose_dependencies(
         llvm_prefix = f"{brew_prefix}/opt/llvm"
         omp_prefix = f"{brew_prefix}/opt/libomp"
         hdf5_prefix = f"{brew_prefix}/opt/hdf5-mpi"
+        bison_prefix = f"{brew_prefix}/opt/bison"
+        flex_prefix = f"{brew_prefix}/opt/flex"
         tool_env["HDF5_DIR"] = hdf5_prefix
         tool_env["PATH"] = (
+            f"{bison_prefix}/bin:{flex_prefix}/bin:"
             f"{llvm_prefix}/bin:{brew_prefix}/bin:"
             + os.environ.get("PATH", "")
         )
