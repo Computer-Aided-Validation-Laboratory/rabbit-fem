@@ -54,24 +54,7 @@ def ensure_moose_repo(repo_dir: Path, moose_dir: Path) -> None:
         f"(pinned to {target_commit[:10]})..."
     )
     if not moose_dir.is_dir():
-        subprocess.run(
-            [
-                "git",
-                "clone",
-                "--branch",
-                "next",
-                "https://github.com/idaholab/moose.git",
-                str(moose_dir),
-            ],
-            check=True,
-        )
-        subprocess.run(
-            ["git", "checkout", target_commit],
-            cwd=str(moose_dir),
-            check=True,
-        )
-    else:
-        # Directory exists from cache; initialize and overlay framework
+        moose_dir.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             ["git", "init"],
             cwd=str(moose_dir),
@@ -86,18 +69,78 @@ def ensure_moose_repo(repo_dir: Path, moose_dir: Path) -> None:
                 "https://github.com/idaholab/moose.git",
             ],
             cwd=str(moose_dir),
-            check=False,
+            check=True,
         )
         subprocess.run(
-            ["git", "fetch", "--depth", "50", "origin", "next"],
+            [
+                "git",
+                "fetch",
+                "--depth",
+                "1",
+                "origin",
+                target_commit,
+            ],
             cwd=str(moose_dir),
             check=True,
         )
         subprocess.run(
-            ["git", "checkout", "-f", target_commit],
+            ["git", "checkout", "FETCH_HEAD"],
             cwd=str(moose_dir),
             check=True,
         )
+    else:
+        # Directory exists from cache; fetch framework and overlay
+        temp_clone = repo_dir / ".moose_framework_tmp"
+        if temp_clone.exists():
+            shutil.rmtree(temp_clone, ignore_errors=True)
+        temp_clone.mkdir(parents=True, exist_ok=True)
+        try:
+            subprocess.run(
+                ["git", "init"],
+                cwd=str(temp_clone),
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/idaholab/moose.git",
+                ],
+                cwd=str(temp_clone),
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "fetch",
+                    "--depth",
+                    "1",
+                    "origin",
+                    target_commit,
+                ],
+                cwd=str(temp_clone),
+                check=True,
+            )
+            subprocess.run(
+                ["git", "checkout", "FETCH_HEAD"],
+                cwd=str(temp_clone),
+                check=True,
+            )
+            for item in temp_clone.iterdir():
+                if item.name == ".git":
+                    continue
+                dest = moose_dir / item.name
+                if item.is_dir():
+                    if item.name in ("petsc", "libmesh") and dest.is_dir():
+                        continue
+                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dest)
+        finally:
+            if temp_clone.exists():
+                shutil.rmtree(temp_clone, ignore_errors=True)
 
 
 def ensure_moose_submodules(moose_dir: Path) -> None:
