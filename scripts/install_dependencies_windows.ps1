@@ -248,7 +248,7 @@ if (-not (Test-Path $MooseConfig)) {
 # 10. Build Rabbit
 $RabbitExe = Join-Path $RepoRoot "rabbit-$Method.exe"
 Write-Host "`n[*] Building Rabbit application (rabbit-$Method.exe)..." -ForegroundColor Yellow
-$rabbitBuild = "make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a && if [ -f .libs/rabbit-$Method.exe ]; then cp .libs/rabbit-$Method.exe rabbit-$Method.exe; elif [ -f .libs/rabbit-$Method ]; then cp .libs/rabbit-$Method rabbit-$Method.exe; elif [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi && ls -la rabbit* .libs/rabbit* 2>/dev/null || true"
+$rabbitBuild = "make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a 2>&1 | tee make.log && if [ -f .libs/rabbit-$Method.exe ]; then cp .libs/rabbit-$Method.exe rabbit-$Method.exe; elif [ -f .libs/rabbit-$Method ]; then cp .libs/rabbit-$Method rabbit-$Method.exe; elif [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
 Invoke-MsysBash $rabbitBuild "Compiling and linking Rabbit"
 
 if (-not (Test-Path $RabbitExe)) {

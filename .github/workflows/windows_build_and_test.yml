@@ -140,8 +140,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $logPath = if (Test-Path current_step.log) { "current_step.log" } elseif (Test-Path make.log) { "make.log" } elseif (Test-Path last_step.log) { "last_step.log" } else { $null }
-          $pasteUrl = if (Test-Path paste_url.txt) { (Get-Content paste_url.txt -Raw).Trim() } else { $null }
+          $logPath = $null
+          if (Test-Path "make.log") { $logPath = "make.log" }
+          elseif (Test-Path "current_step.log") { $logPath = "current_step.log" }
+          elseif (Test-Path "last_step.log") { $logPath = "last_step.log" }
+          else {
+            $found = Get-ChildItem -Path . -Filter "*step*.log" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $logPath = $found.FullName }
+          }
+
+          $pasteUrl = if (Test-Path "paste_url.txt") { (Get-Content "paste_url.txt" -Raw).Trim() } else { $null }
           if (-not $pasteUrl -and $logPath) {
             try {
               $pasteUrl = (Invoke-RestMethod -Uri "https://paste.rs" -Method Post -InFile $logPath -TimeoutSec 10).Trim()
@@ -161,12 +169,4 @@ jobs:
             gh pr comment 1 -R ${{ github.repository }} --body-file comment.txt
           } catch {
             Write-Host "PR comment failed: $_"
-          }
-
-          try {
-            $jsonPayload = @{ body = $commentBody } | ConvertTo-Json
-            [System.IO.File]::WriteAllText("comment_payload.json", $jsonPayload, [System.Text.Encoding]::UTF8)
-            gh api "repos/${{ github.repository }}/issues/1/comments" --input comment_payload.json
-          } catch {
-            Write-Host "Issue comment failed: $_"
           }
