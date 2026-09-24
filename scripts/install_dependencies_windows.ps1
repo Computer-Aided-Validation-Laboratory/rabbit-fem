@@ -6,7 +6,7 @@
 # ------------------------------------------------------------------------------
 
 param(
-    [int]$Jobs = 8,
+    [int]$Jobs = 4,
     [string]$Method = "opt",
     [switch]$SkipTests
 )
@@ -109,29 +109,18 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
 
     $stepScript = Join-Path $RepoRoot "run_step.sh"
     $stepScriptPosix = "$RepoRootPosix/run_step.sh"
-    $exitCodeFile = Join-Path $RepoRoot "step_exit_code.txt"
-    $exitCodePosix = "$RepoRootPosix/step_exit_code.txt"
-    if (Test-Path $exitCodeFile) { Remove-Item -Force $exitCodeFile }
 
-    $scriptContent = "#!/usr/bin/env bash`n" +
-        "export PATH=`"$RepoRootPosix/.zig_wrappers:/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`"`n" +
-        "cd `"$RepoRootPosix`"`n" +
-        "trap 'echo `$? > `"$exitCodePosix`"' EXIT`n" +
-        "set -e`n" +
-        $BashCommand + "`n" +
-        "trap - EXIT`n" +
-        "echo 0 > `"$exitCodePosix`"`n"
-    [System.IO.File]::WriteAllText($stepScript, $scriptContent)
+    $lines = @(
+        "export PATH=`"$RepoRootPosix/.zig_wrappers:/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`"",
+        "cd `"$RepoRootPosix`"",
+        $BashCommand
+    )
+    $content = ($lines -join "`n") + "`n"
+    [System.IO.File]::WriteAllText($stepScript, $content, (New-Object System.Text.UTF8Encoding($false)))
 
-    & $MsysBash $stepScriptPosix 2>&1 | Tee-Object -FilePath $localLog
+    $cmd = "set -o pipefail && ( source `"$stepScriptPosix`" ) 2>&1 | tee `"$RepoRootPosix/current_step.log`""
+    & $MsysBash -lc $cmd
     $code = $LASTEXITCODE
-
-    if (Test-Path $exitCodeFile) {
-        $fileCode = (Get-Content $exitCodeFile -Raw).Trim()
-        if ($fileCode -match '^\d+$') {
-            $code = [int]$fileCode
-        }
-    }
 
     if (Test-Path $localLog) {
         Copy-Item $localLog $lastLog -Force
