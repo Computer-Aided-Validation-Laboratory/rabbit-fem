@@ -135,9 +135,15 @@ def ensure_moose_repo(repo_dir: Path, moose_dir: Path) -> None:
                 if item.is_dir():
                     if item.name in ("petsc", "libmesh") and dest.is_dir():
                         continue
-                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                    shutil.copytree(
+                        item,
+                        dest,
+                        symlinks=True,
+                        ignore_dangling_symlinks=True,
+                        dirs_exist_ok=True,
+                    )
                 else:
-                    shutil.copy2(item, dest)
+                    shutil.copy2(item, dest, follow_symlinks=False)
         finally:
             if temp_clone.exists():
                 shutil.rmtree(temp_clone, ignore_errors=True)
