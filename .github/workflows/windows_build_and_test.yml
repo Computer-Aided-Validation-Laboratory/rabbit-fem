@@ -143,13 +143,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $logPath = $null
-          if (Test-Path "last_step.log") { $logPath = "last_step.log" }
-          elseif (Test-Path "current_step.log") { $logPath = "current_step.log" }
+          if (Test-Path "current_step.log") { $logPath = "current_step.log" }
+          elseif (Test-Path "last_step.log") { $logPath = "last_step.log" }
           elseif (Test-Path "make.log") { $logPath = "make.log" }
           else {
             $found = Get-ChildItem -Path . -Filter "*step*.log" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($found) { $logPath = $found.FullName }
           }
+
+          Write-Host "================ FAILURE LOG TAIL ================" -ForegroundColor Red
+          if ($logPath -and (Test-Path $logPath)) {
+            Get-Content $logPath -Tail 150 | ForEach-Object { Write-Host $_ }
+          } else {
+            Write-Host "No step log found."
+          }
+          Write-Host "==================================================" -ForegroundColor Red
 
           $pasteUrl = if (Test-Path "paste_url.txt") { (Get-Content "paste_url.txt" -Raw).Trim() } else { $null }
           if (-not $pasteUrl -and $logPath) {
@@ -157,7 +165,7 @@ jobs:
               $pasteUrl = (Invoke-RestMethod -Uri "https://paste.rs" -Method Post -InFile $logPath -TimeoutSec 10).Trim()
             } catch {}
           }
-          $tail = if ($logPath) { (Get-Content $logPath -Tail 80) -join "`n" } else { "No step log available." }
+          $tail = if ($logPath) { (Get-Content $logPath -Tail 100) -join "`n" } else { "No step log available." }
           $tailClean = $tail -replace "`e\[[0-9;]*[a-zA-Z]", "" -replace "[\x00-\x08\x0B\x0C\x0E-\x1F]", ""
           $pasteInfo = if ($pasteUrl) { "**Full Failure Log:** $pasteUrl`n`n" } else { "" }
           $commentBody = "### ❌ Windows Build Failure on commit ${{ github.sha }}`n`n${pasteInfo}``````text`n$tailClean`n```````n"
