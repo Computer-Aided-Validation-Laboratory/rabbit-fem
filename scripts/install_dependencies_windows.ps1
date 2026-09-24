@@ -38,7 +38,8 @@ foreach ($tool in $requiredMsysTools) {
 }
 if ($needsInstall) {
     Write-Host "[*] Synchronizing MSYS2 database and installing required packages..." -ForegroundColor Yellow
-    & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/cmake
+    & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/python-pip msys/cmake
+    & "C:\msys64\usr\bin\python3.exe" -m pip install --break-system-packages --quiet packaging pyyaml
 }
 foreach ($tool in $requiredMsysTools) {
     if (-not (Test-Path "C:\msys64\usr\bin\$tool")) {

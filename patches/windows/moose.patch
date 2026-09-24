@@ -28,3 +28,30 @@
  
  #
  # gtest
+--- a/framework/scripts/get_repo_revision.py
++++ b/framework/scripts/get_repo_revision.py
+@@ -16,7 +16,23 @@
+ if sys.version_info[0] == 3 and sys.version_info[1] < 7:
+     from distutils.version import LooseVersion
+ else:
+-    from packaging import version
++    try:
++        from packaging import version
++    except ImportError:
++        try:
++            from distutils.version import LooseVersion as version
++        except ImportError:
++            class _VersionFallback:
++                def __init__(self, v):
++                    self.v = str(v)
++                def __ge__(self, other):
++                    v1 = tuple(int(x) for x in re.findall(r'\d+', self.v))
++                    v2 = tuple(int(x) for x in re.findall(r'\d+', str(other)))
++                    return v1 >= v2
++            class version:
++                @staticmethod
++                def parse(v):
++                    return _VersionFallback(v)
+ 
+ 
+ def shellCommand(command, cwd=None):

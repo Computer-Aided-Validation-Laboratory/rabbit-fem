@@ -66,14 +66,20 @@ This document details all unified patch files stored in [`patches/windows/`](fil
 - **Target Component**: `moose`
 - **Files Modified**:
   - `framework/moose.mk`
-- **Origin**: **Windows CI** ([Run #35980313025](https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/runs/35980313025) on commit `f1e3357`).
+  - `framework/scripts/get_repo_revision.py`
+- **Origin**:
+  - `moose.mk`: **Windows CI** ([Run #35980313025](https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/runs/35980313025) on commit `f1e3357`).
+  - `get_repo_revision.py`: **Windows CI** ([Run #35996839352](https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/runs/35996839352) on commit `bafabb7`).
 - **What it does**:
-  1. On Windows (`$(findstring NT,$(shell uname))`):
+  1. In `moose.mk` on Windows (`$(findstring NT,$(shell uname))`):
      - Stubs the build rule for `pycapabilities` (`_pycapabilities.so`/`.pyd`) by creating the destination directory and touching the target file.
      - Builds the HIT parser and library via `cd $(HIT_DIR) && $(MAKE)` and touches `$(pyhit_LIB)`.
+  2. In `get_repo_revision.py`:
+     - Adds a fallback version comparison mechanism so `MooseRevision.h` generation succeeds even if the host/MSYS2 Python environment lacks the third-party `packaging` module.
 - **Why it is needed**:
   1. In MSYS2, `python3-config` resolves to MSYS2 POSIX Python (`/usr/bin/python3-config`), which pulls in `/usr/include/python3.12/Python.h` and `<sys/select.h>`. When compiling with Zig targeting Windows GNU (`x86_64-windows-gnu`), `<sys/select.h>` is unavailable in the Windows C runtime, causing `_pycapabilities.so` compilation to fail with `fatal error: 'sys/select.h' file not found`.
   2. `_pycapabilities` and `pyhit_LIB` are Python C extensions intended for MOOSE internal test harness scripts and are neither linked into `rabbit-opt.exe` nor packaged into Rabbit distribution wheels. Stubbing them on Windows allows the core simulation engine and application binary to build and link cleanly without POSIX Python runtime conflicts.
+  3. `get_repo_revision.py` unconditionally imported `from packaging import version` on Python $\ge 3.7$. In clean MSYS2 Python installations, `packaging` is not present by default, causing `MooseRevision.h` header generation to fail during `make`. Providing a lightweight standard library fallback ensures header generation always succeeds.
 
 ---
 
