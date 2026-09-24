@@ -196,9 +196,8 @@ $MooseConfig = Join-Path $RepoRoot "moose\framework\include\base\MooseConfig.h"
 $AllDepsBuilt = (Test-Path $PetscLib) -and (Test-Path $LibMeshLib) -and (Test-Path $HitExe) -and (Test-Path $MooseConfig)
 
 if (-not (Test-Path $MooseFrameworkMk)) {
-    if (-not (Test-Path $MooseDir)) {
-        Invoke-MsysBash "git init moose && cd moose && git remote add origin https://github.com/idaholab/moose.git && git fetch --depth 1 origin $MooseCommit && git checkout FETCH_HEAD" "Fetching MOOSE repository at commit $MooseCommit"
-    }
+    Write-Host "[*] Ensuring MOOSE framework files exist (commit $MooseCommit)..." -ForegroundColor Yellow
+    & $VenvPython -c "from scripts.build.common import ensure_moose_repo, get_moose_dir; from pathlib import Path; ensure_moose_repo(Path('.'), get_moose_dir(Path('.')))"
 }
 
 $needPetsc = -not (Test-Path $PetscLib) -and -not (Test-Path $MoosePetscCfg)
@@ -285,11 +284,10 @@ if (-not (Test-Path $HitExe)) {
 
 # 9. Configure MOOSE
 $MooseConfig = Join-Path $RepoRoot "moose\framework\include\base\MooseConfig.h"
-if (-not (Test-Path $MooseConfig)) {
-    # Apply Windows patch for MOOSE framework
-    $applyMoose = "cd moose && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/moose.patch`""
-    Invoke-MsysBash $applyMoose "Applying MOOSE Windows patch"
+$applyMoose = "cd moose && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/moose.patch`" || true"
+Invoke-MsysBash $applyMoose "Applying MOOSE Windows patch"
 
+if (-not (Test-Path $MooseConfig)) {
     $mooseConf = "cd moose && ./configure --with-derivative-size=89"
     Invoke-MsysBash $mooseConf "Configuring MOOSE framework"
 } else {
