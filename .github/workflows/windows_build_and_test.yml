@@ -131,6 +131,7 @@ jobs:
             current_step.log
             make.log
             last_step.log
+            paste_url.txt
             moose/petsc/arch-windows-opt/lib/petsc/conf/configure.log
           if-no-files-found: ignore
 
@@ -140,23 +141,32 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $logPath = if (Test-Path current_step.log) { "current_step.log" } elseif (Test-Path make.log) { "make.log" } elseif (Test-Path last_step.log) { "last_step.log" } else { $null }
-          if ($logPath) {
-            $tail = (Get-Content $logPath -Tail 150) -join "`n"
-            $commentBody = "### ❌ Windows Build Failure on commit ${{ github.sha }}`n`n``````text`n$tail`n```````n"
-            [System.IO.File]::WriteAllText((Join-Path (Get-Location) "comment.txt"), $commentBody, [System.Text.Encoding]::UTF8)
+          $pasteUrl = if (Test-Path paste_url.txt) { (Get-Content paste_url.txt -Raw).Trim() } else { $null }
+          if (-not $pasteUrl -and $logPath) {
             try {
-              gh pr comment 1 -R ${{ github.repository }} --body-file comment.txt
-            } catch {
-              Write-Host "PR comment failed: $_"
-            }
-            try {
-              gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -F "body=@comment.txt"
-            } catch {
-              Write-Host "Commit comment failed: $_"
-            }
-            try {
-              gh api "repos/${{ github.repository }}/issues/1/comments" -F "body=@comment.txt"
-            } catch {
-              Write-Host "Issue comment failed: $_"
-            }
+              $pasteUrl = (Invoke-RestMethod -Uri "https://paste.rs" -Method Post -InFile $logPath -TimeoutSec 10).Trim()
+            } catch {}
+          }
+          $tail = if ($logPath) { (Get-Content $logPath -Tail 80) -join "`n" } else { "No step log available." }
+          $tailClean = $tail -replace "`e\[[0-9;]*[a-zA-Z]", "" -replace "[\x00-\x08\x0B\x0C\x0E-\x1F]", ""
+          $pasteInfo = if ($pasteUrl) { "**Full Failure Log:** $pasteUrl`n`n" } else { "" }
+          $commentBody = "### ❌ Windows Build Failure on commit ${{ github.sha }}`n`n${pasteInfo}``````text`n$tailClean`n```````n"
+          [System.IO.File]::WriteAllText("comment.txt", $commentBody, [System.Text.Encoding]::UTF8)
+
+          if ($env:GITHUB_STEP_SUMMARY) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $commentBody
+          }
+
+          try {
+            gh pr comment 1 -R ${{ github.repository }} --body-file comment.txt
+          } catch {
+            Write-Host "PR comment failed: $_"
+          }
+
+          try {
+            $jsonPayload = @{ body = $commentBody } | ConvertTo-Json
+            [System.IO.File]::WriteAllText("comment_payload.json", $jsonPayload, [System.Text.Encoding]::UTF8)
+            gh api "repos/${{ github.repository }}/issues/1/comments" --input comment_payload.json
+          } catch {
+            Write-Host "Issue comment failed: $_"
           }

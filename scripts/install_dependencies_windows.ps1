@@ -112,6 +112,18 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     & $MsysBash -lc $combined
     $code = $LASTEXITCODE
     if ($code -ne 0) {
+        Write-Host "`n[!] $StepTitle FAILED with exit code $code" -ForegroundColor Red
+        if (Test-Path $localLog) {
+            $tail = Get-Content $localLog -Tail 100
+            Write-Host "`n--- LAST 100 LINES OF $StepTitle LOG ---" -ForegroundColor Red
+            $tail | ForEach-Object { Write-Host $_ }
+            Write-Host "--- END OF LOG ---`n" -ForegroundColor Red
+            try {
+                $pasteUrl = (Invoke-RestMethod -Uri "https://paste.rs" -Method Post -InFile $localLog -TimeoutSec 10).Trim()
+                Write-Host "[*] Build failure log uploaded to: $pasteUrl" -ForegroundColor Yellow
+                $pasteUrl | Set-Content (Join-Path $RepoRoot "paste_url.txt")
+            } catch {}
+        }
         throw "$StepTitle failed with exit code $code."
     }
     Write-Host "[OK] $StepTitle completed successfully." -ForegroundColor Green
@@ -236,7 +248,7 @@ if (-not (Test-Path $MooseConfig)) {
 # 10. Build Rabbit
 $RabbitExe = Join-Path $RepoRoot "rabbit-$Method.exe"
 Write-Host "`n[*] Building Rabbit application (rabbit-$Method.exe)..." -ForegroundColor Yellow
-$rabbitBuild = "make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a && if [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
+$rabbitBuild = "make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a && if [ -f .libs/rabbit-$Method.exe ]; then cp .libs/rabbit-$Method.exe rabbit-$Method.exe; elif [ -f .libs/rabbit-$Method ]; then cp .libs/rabbit-$Method rabbit-$Method.exe; elif [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi && ls -la rabbit* .libs/rabbit* 2>/dev/null || true"
 Invoke-MsysBash $rabbitBuild "Compiling and linking Rabbit"
 
 if (-not (Test-Path $RabbitExe)) {
