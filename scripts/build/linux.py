@@ -200,54 +200,77 @@ def build_linux_dependencies(
     )
 
     # 1. Build PETSc
-    print("--> Building PETSc...")
-    petsc_env = dict(tool_env)
-    petsc_env.pop("PETSC_DIR", None)
-    petsc_env.pop("PETSC_ARCH", None)
-    subprocess.run(
-        [
-            "./scripts/update_and_rebuild_petsc.sh",
-            "--skip-submodule-update",
-            "--CXXOPTFLAGS=-O3",
-            "--COPTFLAGS=-O3",
-            "--FOPTFLAGS=-O3",
-        ],
-        cwd=str(moose_dir),
-        env=petsc_env,
-        check=True,
+    petsc_built = (
+        (moose_dir / "petsc" / "arch-moose" / "lib" / "libpetsc.so").is_file()
+        or (
+            moose_dir / "petsc" / "arch-linux" / "lib" / "libpetsc.so"
+        ).is_file()
+        or (moose_dir / "petsc" / "lib" / "libpetsc.so").is_file()
     )
+    if not petsc_built:
+        print("--> Building PETSc...")
+        petsc_env = dict(tool_env)
+        petsc_env.pop("PETSC_DIR", None)
+        petsc_env.pop("PETSC_ARCH", None)
+        subprocess.run(
+            [
+                "./scripts/update_and_rebuild_petsc.sh",
+                "--skip-submodule-update",
+                "--CXXOPTFLAGS=-O3",
+                "--COPTFLAGS=-O3",
+                "--FOPTFLAGS=-O3",
+            ],
+            cwd=str(moose_dir),
+            env=petsc_env,
+            check=True,
+        )
+    else:
+        print("[OK] PETSc already built.")
 
     # 2. Build libMesh
-    print("--> Building libMesh with Zig toolchain...")
-    libmesh_env = dict(tool_env)
-    libmesh_env["METHODS"] = "opt"
-    subprocess.run(
-        [
-            "./scripts/update_and_rebuild_libmesh.sh",
-            "--with-mpi",
-        ],
-        cwd=str(moose_dir),
-        env=libmesh_env,
-        check=True,
-    )
+    libmesh_lib = moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.so"
+    libmesh_a = moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.a"
+    if not (libmesh_lib.is_file() or libmesh_a.is_file()):
+        print("--> Building libMesh with Zig toolchain...")
+        libmesh_env = dict(tool_env)
+        libmesh_env["METHODS"] = "opt"
+        subprocess.run(
+            [
+                "./scripts/update_and_rebuild_libmesh.sh",
+                "--with-mpi",
+            ],
+            cwd=str(moose_dir),
+            env=libmesh_env,
+            check=True,
+        )
+    else:
+        print("[OK] libMesh already built.")
 
     # 3. Build WASP
-    print("--> Building WASP parser...")
-    subprocess.run(
-        ["./scripts/update_and_rebuild_wasp.sh"],
-        cwd=str(moose_dir),
-        env=tool_env,
-        check=True,
-    )
+    wasp_install = moose_dir / "framework" / "contrib" / "wasp" / "install"
+    if not (wasp_install / "lib").is_dir():
+        print("--> Building WASP parser...")
+        subprocess.run(
+            ["./scripts/update_and_rebuild_wasp.sh"],
+            cwd=str(moose_dir),
+            env=tool_env,
+            check=True,
+        )
+    else:
+        print("[OK] WASP parser already built.")
 
     # 4. Configure MOOSE
-    print("--> Configuring MOOSE...")
-    subprocess.run(
-        ["./configure", "--with-derivative-size=89"],
-        cwd=str(moose_dir),
-        env=tool_env,
-        check=True,
-    )
+    moose_cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    if not moose_cfg.is_file():
+        print("--> Configuring MOOSE...")
+        subprocess.run(
+            ["./configure", "--with-derivative-size=89"],
+            cwd=str(moose_dir),
+            env=tool_env,
+            check=True,
+        )
+    else:
+        print("[OK] MOOSE framework already configured.")
 
     print("=" * 60)
     print(" MOOSE Linux dependencies built and configured successfully!")
