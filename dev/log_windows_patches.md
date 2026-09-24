@@ -74,12 +74,14 @@ This document details all unified patch files stored in [`patches/windows/`](fil
   1. In `moose.mk` on Windows (`$(findstring NT,$(shell uname))`):
      - Stubs the build rule for `pycapabilities` (`_pycapabilities.so`/`.pyd`) by creating the destination directory and touching the target file.
      - Builds the HIT parser and library via `cd $(HIT_DIR) && $(MAKE)` and touches `$(pyhit_LIB)`.
+     - Ensures `unity_file_rule` and `UNAME10` match all Windows NT variants (including MSYS2 `MSYS_NT-*`), invoking `cygpath -m` to output standard Windows drive paths (`D:/...`) into `#include` statements within generated `_Unity.C` files.
   2. In `get_repo_revision.py`:
      - Adds a fallback version comparison mechanism so `MooseRevision.h` generation succeeds even if the host/MSYS2 Python environment lacks the third-party `packaging` module.
 - **Why it is needed**:
   1. In MSYS2, `python3-config` resolves to MSYS2 POSIX Python (`/usr/bin/python3-config`), which pulls in `/usr/include/python3.12/Python.h` and `<sys/select.h>`. When compiling with Zig targeting Windows GNU (`x86_64-windows-gnu`), `<sys/select.h>` is unavailable in the Windows C runtime, causing `_pycapabilities.so` compilation to fail with `fatal error: 'sys/select.h' file not found`.
   2. `_pycapabilities` and `pyhit_LIB` are Python C extensions intended for MOOSE internal test harness scripts and are neither linked into `rabbit-opt.exe` nor packaged into Rabbit distribution wheels. Stubbing them on Windows allows the core simulation engine and application binary to build and link cleanly without POSIX Python runtime conflicts.
   3. `get_repo_revision.py` unconditionally imported `from packaging import version` on Python $\ge 3.7$. In clean MSYS2 Python installations, `packaging` is not present by default, causing `MooseRevision.h` header generation to fail during `make`. Providing a lightweight standard library fallback ensures header generation always succeeds.
+  4. In MSYS2 bash, `uname` outputs `MSYS_NT-10.0-...`, causing the upstream `ifeq ($(UNAME10), MINGW64_NT)` check to evaluate to false. This resulted in generating raw MSYS POSIX paths (e.g. `"/d/a/..."`) inside unity source `#include` directives. Windows-native Clang cannot resolve POSIX mount paths, triggering `'file not found'` compilation errors. Using `cygpath -m` produces Windows paths (`"D:/a/..."`) that Clang resolves directly.
 
 ---
 

@@ -1,5 +1,14 @@
 --- a/framework/moose.mk
 +++ b/framework/moose.mk
+@@ -203,7 +203,7 @@
+ 
+ # windows (msys2) specific settings (we need to cut the version number off)
+ UNAME10 := $(shell uname | cut -c-10)
+-ifeq ($(UNAME10), MINGW64_NT)
++ifeq ($(findstring NT,$(shell uname)),NT)
+ 	libmesh_LDFLAGS    += -no-undefined
+ 	PYMOD_EXTENSION    := pyd
+ 	PYMOD_COMPILEFLAGS := $(shell $(pyconfig) --cflags --ldflags --libs)
 @@ -221,6 +221,19 @@
  pyhit_LIB          := $(HIT_DIR)/hit.$(PYMOD_EXTENSION)
  pyhit_COMPILEFLAGS += $(PYMOD_COMPILEFLAGS) $(wasp_CXXFLAGS) $(wasp_LDFLAGS)
@@ -28,6 +37,15 @@
  
  #
  # gtest
+@@ -362,7 +376,7 @@
+ # 4: The unity build area (for filtering out, not a dependency)
+ # The "|" in the prereqs starts the beginning of "position dependent" prereqs
+ # these are prereqs that must be run first - but their timestamp isn't used
+-ifeq ($(UNAME10), MINGW64_NT)
++ifeq ($(findstring NT,$(shell uname)),NT)
+ define unity_file_rule
+ $(1): $(2) $(3) | $(4) prebuild
+ 	@echo Creating Unity \(Windows\) $$@
 --- a/framework/scripts/get_repo_revision.py
 +++ b/framework/scripts/get_repo_revision.py
 @@ -16,7 +16,23 @@
