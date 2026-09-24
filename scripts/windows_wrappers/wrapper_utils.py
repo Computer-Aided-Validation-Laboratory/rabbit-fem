@@ -33,13 +33,27 @@ def process_wl_arg(arg: str) -> List[str]:
     """Extract .a and .lib archive files from -Wl, flags.
 
     Zig's CLI rejects static archives inside -Wl, with
-    'error: unsupported linker arg'.
+    'error: unsupported linker arg'. Preserves options like
+    --out-implib whose argument may end in .a.
     """
     parts = arg[4:].split(",")
     normal_parts: List[str] = []
     archive_args: List[str] = []
-    for part in parts:
+    skip_next = False
+    for idx, part in enumerate(parts):
+        if skip_next:
+            skip_next = False
+            continue
         part_win = posix_to_win(part)
+        if part in ("--out-implib", "-out-implib"):
+            normal_parts.append(part)
+            if idx + 1 < len(parts):
+                normal_parts.append(posix_to_win(parts[idx + 1]))
+                skip_next = True
+            continue
+        if part.startswith(("--out-implib=", "-out-implib=")):
+            normal_parts.append(posix_to_win(part))
+            continue
         if part_win.endswith(".a") or part_win.endswith(".lib"):
             archive_args.append(part_win)
         else:
