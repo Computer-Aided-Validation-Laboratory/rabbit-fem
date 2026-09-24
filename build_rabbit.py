@@ -74,12 +74,26 @@ def setup_zig_wrappers(repo_dir: Path) -> tuple[Path, Path]:
     zigcc_path = wrapper_dir / "zigcc"
     zigcxx_path = wrapper_dir / "zigcxx"
 
-    clang_candidates = (
-        [shutil.which("clang")] if shutil.which("clang") else []
-    ) + sorted(glob.glob("/opt/rocm-*/lib/llvm/bin/clang"))
-    clangxx_candidates = (
-        [shutil.which("clang++")] if shutil.which("clang++") else []
-    ) + sorted(glob.glob("/opt/rocm-*/lib/llvm/bin/clang++"))
+    if sys.platform == "darwin":
+        llvm_clang = (
+            sorted(glob.glob("/opt/homebrew/opt/llvm*/bin/clang"))
+            + sorted(glob.glob("/usr/local/opt/llvm*/bin/clang"))
+        )
+        clang_candidates = (
+            llvm_clang
+            + ([shutil.which("clang")] if shutil.which("clang") else [])
+        )
+        clangxx_candidates = (
+            [p.replace("clang", "clang++") for p in llvm_clang]
+            + ([shutil.which("clang++")] if shutil.which("clang++") else [])
+        )
+    else:
+        clang_candidates = (
+            [shutil.which("clang")] if shutil.which("clang") else []
+        ) + sorted(glob.glob("/opt/rocm-*/lib/llvm/bin/clang"))
+        clangxx_candidates = (
+            [shutil.which("clang++")] if shutil.which("clang++") else []
+        ) + sorted(glob.glob("/opt/rocm-*/lib/llvm/bin/clang++"))
 
     if clang_candidates and clangxx_candidates:
         c_compiler = clang_candidates[0]
@@ -378,7 +392,7 @@ def build_moose_dependencies(
 
     # 1. Build PETSc
     print("--> Building PETSc...")
-    petsc_env = dict(os.environ)
+    petsc_env = dict(tool_env)
     petsc_env.pop("PETSC_DIR", None)
     petsc_env.pop("PETSC_ARCH", None)
     subprocess.run(

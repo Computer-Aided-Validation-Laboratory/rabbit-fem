@@ -261,7 +261,7 @@ if (-not (Test-Path $HitExe)) {
 # 9. Configure MOOSE
 $MooseConfig = Join-Path $RepoRoot "moose\framework\include\base\MooseConfig.h"
 if (-not (Test-Path $MooseConfig)) {
-    $mooseConf = "cd moose/framework && ./configure --with-derivative-size=89"
+    $mooseConf = "cd moose && ./configure --with-derivative-size=89"
     Invoke-MsysBash $mooseConf "Configuring MOOSE framework"
 } else {
     Write-Host "[OK] MOOSE framework already configured." -ForegroundColor Green

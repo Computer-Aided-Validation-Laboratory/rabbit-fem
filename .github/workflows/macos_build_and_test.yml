@@ -30,6 +30,7 @@ jobs:
           brew install \
             open-mpi \
             gcc \
+            llvm \
             libomp \
             pkg-config \
             cmake
@@ -124,3 +125,29 @@ jobs:
             moose/petsc/configure.log
             moose/libmesh/config.log
           if-no-files-found: ignore
+
+      - name: "macOS: Post failure comment"
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          paste_url=""
+          log_file=""
+          for cand in moose/petsc/arch-moose/lib/petsc/conf/configure.log moose/petsc/configure.log moose/libmesh/config.log; do
+            if [ -f "$cand" ]; then
+              log_file="$cand"
+              break
+            fi
+          done
+          if [ -n "$log_file" ]; then
+            paste_url=$(curl -s --data-binary @"$log_file" https://paste.rs || true)
+            tail_content=$(tail -n 80 "$log_file")
+          else
+            tail_content="No specific configure log found."
+          fi
+          printf "### ❌ macOS Build Failure on commit %s\n\n" "${{ github.sha }}" > comment.txt
+          if [ -n "$paste_url" ]; then
+            printf "**Full Failure Log:** %s\n\n" "$paste_url" >> comment.txt
+          fi
+          printf '```text\n%s\n```\n' "$tail_content" >> comment.txt
+          gh pr comment 1 -R ${{ github.repository }} --body-file comment.txt || true

@@ -170,7 +170,7 @@ jobs:
           path: |
             dist
             src/rabbit/bin
-          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'build_rabbit.py', 'patches/**') }}
 
       - name: "Windows: Restore MOOSE cache"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
@@ -184,7 +184,7 @@ jobs:
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
             moose/framework/include/base/MooseConfig.h
-          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**') }}
+          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
 
       - name: "Windows: Build MOOSE dependencies and Rabbit"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
@@ -202,7 +202,7 @@ jobs:
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
             moose/framework/include/base/MooseConfig.h
-          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**') }}
+          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
 
       - name: "Windows: Package standalone wheel"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
@@ -220,7 +220,7 @@ jobs:
           path: |
             dist
             src/rabbit/bin
-          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'build_rabbit.py', 'patches/**') }}
 
       - name: "Windows: Upload wheel artifact"
         uses: actions/upload-artifact@v4
@@ -229,9 +229,112 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  build-macos:
+    name: "macOS: Build and Verify Wheel"
+    runs-on: macos-14
+    timeout-minutes: 180
+
+    steps:
+      - name: "macOS: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: "macOS: Install system packages"
+        run: |
+          brew update
+          brew install \
+            open-mpi \
+            gcc \
+            llvm \
+            libomp \
+            pkg-config \
+            cmake
+
+      - name: "macOS: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "macOS: Set up Python"
+        run: |
+          uv python install 3.13
+          uv venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: "macOS: Install Python build tools"
+        run: |
+          uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh
+
+      - name: "macOS: Restore wheel cache"
+        uses: actions/cache/restore@v4
+        id: wheel-macos-cache
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/lib
+          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'build_rabbit.py') }}
+
+      - name: "macOS: Restore MOOSE cache"
+        if: steps.wheel-macos-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: moose-macos-cache
+        with:
+          path: |
+            moose/petsc
+            moose/libmesh/installed
+            moose/framework/contrib/wasp/install
+            moose/framework/include/base/MooseConfig.h
+          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
+
+      - name: "macOS: Build MOOSE dependencies"
+        if: steps.wheel-macos-cache.outputs.cache-hit != 'true' && steps.moose-macos-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --moose
+
+      - name: "macOS: Save MOOSE cache"
+        if: steps.wheel-macos-cache.outputs.cache-hit != 'true' && steps.moose-macos-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            moose/petsc
+            moose/libmesh/installed
+            moose/framework/contrib/wasp/install
+            moose/framework/include/base/MooseConfig.h
+          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
+
+      - name: "macOS: Build Rabbit, stage artifacts, and build wheel"
+        if: steps.wheel-macos-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --wheel
+
+      - name: "macOS: Run test suite"
+        run: |
+          uv run python build_rabbit.py --test
+
+      - name: "macOS: Save wheel cache"
+        if: steps.wheel-macos-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/lib
+          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'build_rabbit.py') }}
+
+      - name: "macOS: Upload wheel artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rabbit-fem-macos-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
   publish:
     name: "Publish Consolidated Release to PyPI"
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment:
@@ -268,13 +371,18 @@ jobs:
           ls -la dist/
           linux_count=$(ls dist/*manylinux*.whl 2>/dev/null | wc -l)
           win_count=$(ls dist/*win_amd64.whl 2>/dev/null | wc -l)
-          echo "Found $linux_count Linux wheel(s) and $win_count Windows wheel(s)."
+          mac_count=$(ls dist/*macosx*.whl 2>/dev/null | wc -l)
+          echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s), and $mac_count macOS wheel(s)."
           if [ "$linux_count" -lt 1 ]; then
             echo "::error::Missing Linux manylinux wheel in dist/!"
             exit 1
           fi
           if [ "$win_count" -lt 1 ]; then
             echo "::error::Missing Windows win_amd64 wheel in dist/!"
+            exit 1
+          fi
+          if [ "$mac_count" -lt 1 ]; then
+            echo "::error::Missing macOS wheel in dist/!"
             exit 1
           fi
           echo "All platform wheels verified successfully."
