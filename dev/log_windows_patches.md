@@ -59,15 +59,15 @@ This document details all unified patch files stored in [`patches/windows/`](fil
 
 ## Patch Management
 
-All patches are applied automatically in [`scripts/install_dependencies_windows.ps1`](file:///home/lloydf/rabbit-fem/scripts/install_dependencies_windows.ps1) using `git apply`:
+All patches are applied automatically in [`scripts/install_dependencies_windows.ps1`](file:///home/lloydf/rabbit-fem/scripts/install_dependencies_windows.ps1) using MSYS2 `patch`:
 
 ```powershell
 # NetCDF
-cd moose/libmesh/contrib/netcdf/netcdf-c-4.6.2 && git apply "$RepoRootPosix/patches/windows/netcdf.patch"
+cd moose/libmesh/contrib/netcdf/netcdf-c-4.6.2 && patch -p1 -N -r - < "$RepoRootPosix/patches/windows/netcdf.patch"
 
 # METIS
-cd moose/libmesh/contrib/metis/GKlib && git apply "$RepoRootPosix/patches/windows/metis.patch"
+cd moose/libmesh/contrib/metis/GKlib && patch -p1 -N -r - < "$RepoRootPosix/patches/windows/metis.patch"
 
 # WASP
-cd moose/framework/contrib/wasp && git apply "$RepoRootPosix/patches/windows/wasp.patch"
+cd moose/framework/contrib/wasp && patch -p1 -N -r - < "$RepoRootPosix/patches/windows/wasp.patch"
 ```

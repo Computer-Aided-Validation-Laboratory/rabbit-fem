@@ -111,6 +111,7 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     $stepScriptPosix = "$RepoRootPosix/run_step.sh"
 
     $lines = @(
+        "set -euo pipefail",
         "export PATH=`"$RepoRootPosix/.zig_wrappers:/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`"",
         "cd `"$RepoRootPosix`"",
         $BashCommand
@@ -232,10 +233,10 @@ if (-not (Test-Path $LibMeshLib)) {
     Invoke-MsysBash $fixEigen "Resolving and verifying Eigen headers for Windows"
 
     # Apply Windows patches for NetCDF and METIS
-    $applyNetcdf = "cd moose/libmesh/contrib/netcdf/netcdf-c-4.6.2 && git apply `"$RepoRootPosix/patches/windows/netcdf.patch`""
+    $applyNetcdf = "cd moose/libmesh/contrib/netcdf/netcdf-c-4.6.2 && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/netcdf.patch`""
     Invoke-MsysBash $applyNetcdf "Applying NetCDF Windows patch"
 
-    $applyMetis = "cd moose/libmesh/contrib/metis/GKlib && git apply `"$RepoRootPosix/patches/windows/metis.patch`""
+    $applyMetis = "cd moose/libmesh/contrib/metis/GKlib && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/metis.patch`""
     Invoke-MsysBash $applyMetis "Applying METIS Windows patch"
 
     $libmeshBuild = "cd moose/libmesh && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --with-petsc=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt --disable-fortran --disable-exodus-fortran && make -j$Jobs && make install"
@@ -248,7 +249,7 @@ if (-not (Test-Path $LibMeshLib)) {
 $HitExe = Join-Path $RepoRoot "moose\framework\contrib\hit\hit.exe"
 if (-not (Test-Path $HitExe)) {
     # Apply Windows patch for WASP
-    $applyWasp = "cd moose/framework/contrib/wasp && git apply `"$RepoRootPosix/patches/windows/wasp.patch`""
+    $applyWasp = "cd moose/framework/contrib/wasp && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/wasp.patch`""
     Invoke-MsysBash $applyWasp "Applying WASP Windows patch"
 
     $waspBuild = "cd moose/framework/contrib/wasp && mkdir -p build && cd build && cmake -G `"Unix Makefiles`" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cc`" -DCMAKE_CXX_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cxx`" -DCMAKE_AR=`"$RepoRootPosix/.zig_wrappers/zig-ar`" -DCMAKE_RANLIB=`"$RepoRootPosix/.zig_wrappers/zig-ranlib`" -DCMAKE_INSTALL_PREFIX=`"$RepoRootPosix/moose/framework/contrib/wasp/install`" -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_CXX_FLAGS=`"-I$RepoRootPosix/moose/framework/contrib/wasp -I$RepoRootPosix/moose/framework/contrib/wasp/build`" -DCMAKE_C_FLAGS=`"-I$RepoRootPosix/moose/framework/contrib/wasp -I$RepoRootPosix/moose/framework/contrib/wasp/build`" -Dwasp_ENABLE_ALL_PACKAGES=OFF -Dwasp_ENABLE_wasphit=ON -Dwasp_ENABLE_wasplsp=ON -Dwasp_ENABLE_waspsiren=ON -Dwasp_ENABLE_waspplot=ON -Dwasp_ENABLE_testframework=OFF -Dwasp_ENABLE_TESTS=OFF -DBUILD_SHARED_LIBS=OFF -DDISABLE_HIT_TYPE_PROMOTION=ON .. && make -j$Jobs && make install && cd $RepoRootPosix/moose/framework/contrib/hit && make -j$Jobs hit CXX=`"$RepoRootPosix/.zig_wrappers/zig-cxx`" WASP_DIR=`"$RepoRootPosix/moose/framework/contrib/wasp/install`" lib_suffix=a && if [ -f hit ] && [ ! -f hit.exe ]; then cp hit hit.exe; fi"
