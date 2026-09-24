@@ -15,22 +15,18 @@ from typing import List
 
 def posix_to_win(path: str) -> str:
     """Convert MSYS2 POSIX paths (/c/... or /d/...) to Windows paths."""
-    # Match /c/foo or /C/foo
-    match = re.match(r"^/([a-zA-Z])/(.*)", path)
-    if match:
-        return f"{match.group(1).upper()}:/{match.group(2)}"
-    # Match flags with path values: -I, -L, -isystem, -iquote, -idirafter, etc.
-    match_flag = re.match(
-        r"^(-(?:I|L|isystem|iquote|idirafter|Wl,-rpath(?:=|,)?)(?::|=)?)"
-        r"/([a-zA-Z])/(.*)",
+
+    def repl(m: re.Match) -> str:
+        prefix = m.group(1)
+        drive = m.group(2).upper()
+        rest = m.group(3)
+        return f"{prefix}{drive}:{rest}"
+
+    return re.sub(
+        r"(^|[-A-Za-z0-9_=,:\'\"\( ]*?)/([a-zA-Z])(/[\w\.\-+/@]+)",
+        repl,
         path,
     )
-    if match_flag:
-        return (
-            f"{match_flag.group(1)}"
-            f"{match_flag.group(2).upper()}:/{match_flag.group(3)}"
-        )
-    return path
 
 
 def process_wl_arg(arg: str) -> List[str]:

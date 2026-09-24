@@ -85,6 +85,17 @@ This document details all unified patch files stored in [`patches/windows/`](fil
 
 ---
 
+## 5. Toolchain Wrapper POSIX Path Conversion (`scripts/windows_wrappers/wrapper_utils.py`)
+
+- **Target Component**: `scripts/windows_wrappers/wrapper_utils.py`
+- **Origin**: **Windows CI** ([Run #36009350409](https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/runs/36009350409) on commit `c9962f7`).
+- **What it does**:
+  Broadens the `posix_to_win()` path transformer using a generalized regex replacement (`(^|[-A-Za-z0-9_=,:'"\( ]*?)/([a-zA-Z])(/[\w\.\-+/@]+)`) to convert MSYS2 POSIX drive paths (`/d/...`, `/c/...`) to Windows native drive paths (`D:/...`, `C:/...`) across all compiler flags, including `-include /d/...`, `-isystem /d/...`, `-MF /d/...`, `-Wl,-rpath,/d/...`, and composite `-I` and `-L` arguments.
+- **Why it is needed**:
+  During MOOSE and module compilation, GNU Make and `libmesh-config` emit flags with embedded MSYS POSIX paths (such as `libmesh_CPPFLAGS += -include $(moose_config)` or `-I/d/a/rabbit-fem/moose/libmesh/installed/include`). Because `zig cc` / `zig c++` are native Windows Clang binaries, unresolved POSIX paths cause Clang to miss `libmesh_config.h` and PETSc headers, triggering `PETSc has not been detected` and `'petscsys.h' file not found`. Converting all POSIX drive paths transparently in the wrapper ensures every header and library is found.
+
+---
+
 ## Patch Management
 
 All patches are applied automatically in [`scripts/install_dependencies_windows.ps1`](file:///home/lloydf/rabbit-fem/scripts/install_dependencies_windows.ps1) using MSYS2 `patch`:

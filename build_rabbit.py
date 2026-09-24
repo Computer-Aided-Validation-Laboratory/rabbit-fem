@@ -441,6 +441,14 @@ def build_moose_dependencies(
         petsc_cmd.extend([
             "--download-strumpack=0",
             "--with-strumpack=0",
+            "--download-kokkos=0",
+            "--with-kokkos=0",
+            "--download-kokkos-kernels=0",
+            "--with-kokkos-kernels=0",
+            "--download-libceed=0",
+            "--with-libceed=0",
+            "--download-umpire=0",
+            "--with-umpire=0",
         ])
     subprocess.run(
         petsc_cmd,
