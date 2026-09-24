@@ -251,6 +251,7 @@ jobs:
             gcc \
             llvm \
             libomp \
+            hdf5-mpi \
             pkgconf \
             cmake
           echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
