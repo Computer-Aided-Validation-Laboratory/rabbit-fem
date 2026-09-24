@@ -1,0 +1,40 @@
+--- a/config/BuildSystem/config/libraries.py
++++ b/config/BuildSystem/config/libraries.py
+@@ -266,21 +266,33 @@
+     self.pushLanguage(compileLang)
+ 
+     found = 1
+-    if libName and libName[0].startswith('/'):
+-      dir = os.path.dirname(libName[0])
++    if libName and (libName[0].startswith('/') or (len(libName[0]) > 1 and libName[0][1] == ':')):
++      raw_dir = os.path.dirname(libName[0])
++      import re
++      m = re.match(r'^/([a-zA-Z])/(.*)', raw_dir)
++      if m:
++        dir = m.group(1).upper() + ':/' + m.group(2)
++      else:
++        dir = raw_dir
+       lib = os.path.basename(libName[0])[:-1]
+       self.logPrint('Checking directory of requested libraries:'+dir+' for first library:'+lib)
+       found = 0
+       try:
+         files = os.listdir(dir)
+       except:
+-        self.logPrint('Directory of requested libraries '+dir+' does not exist')
+-      else:
++        try:
++          files = os.listdir(raw_dir)
++        except:
++          self.logPrint('Directory of requested libraries '+dir+' does not exist')
++          files = []
++      if files:
+         self.logPrint('Files in directory:'+str(files))
+         for i in files:
+           if i.startswith(lib):
+             found = 1
+             break
++      else:
++        found = 1
+ 
+     if found and self.checkLink(includes, body, linkLanguage=linklang, examineOutput=examineOutput):
+       if hasattr(self.compilers, 'FC') and self.language[-1] == 'C':
