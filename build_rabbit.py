@@ -366,19 +366,45 @@ def build_moose_dependencies(
             if Path("/opt/homebrew").is_dir()
             else "/usr/local"
         )
-        tool_env["CMAKE_LIBRARY_PATH"] = f"{brew_prefix}/lib"
+        llvm_prefix = f"{brew_prefix}/opt/llvm"
+        omp_prefix = f"{brew_prefix}/opt/libomp"
+        tool_env["PATH"] = (
+            f"{llvm_prefix}/bin:{brew_prefix}/bin:"
+            + os.environ.get("PATH", "")
+        )
+        tool_env["CMAKE_LIBRARY_PATH"] = (
+            f"{llvm_prefix}/lib:{omp_prefix}/lib:{brew_prefix}/lib"
+        )
         tool_env["CMAKE_PREFIX_PATH"] = (
-            f"{brew_prefix}:"
+            f"{llvm_prefix}:{omp_prefix}:{brew_prefix}:"
             + os.environ.get("CMAKE_PREFIX_PATH", "")
         )
         tool_env["LIBRARY_PATH"] = (
-            f"{brew_prefix}/lib:"
+            f"{llvm_prefix}/lib:{omp_prefix}/lib:{brew_prefix}/lib:"
             + os.environ.get("LIBRARY_PATH", "")
         )
+        tool_env["DYLD_LIBRARY_PATH"] = (
+            f"{llvm_prefix}/lib:{omp_prefix}/lib:{brew_prefix}/lib:"
+            + os.environ.get("DYLD_LIBRARY_PATH", "")
+        )
         tool_env["CPATH"] = (
+            f"{llvm_prefix}/include:{omp_prefix}/include:"
             f"{brew_prefix}/include:"
             + os.environ.get("CPATH", "")
         )
+        ldflags = (
+            f"-L{llvm_prefix}/lib -Wl,-rpath,{llvm_prefix}/lib "
+            f"-L{omp_prefix}/lib -Wl,-rpath,{omp_prefix}/lib "
+            f"-L{brew_prefix}/lib "
+            + os.environ.get("LDFLAGS", "")
+        ).strip()
+        tool_env["LDFLAGS"] = ldflags
+        cppflags = (
+            f"-I{llvm_prefix}/include -I{omp_prefix}/include "
+            f"-I{brew_prefix}/include "
+            + os.environ.get("CPPFLAGS", "")
+        ).strip()
+        tool_env["CPPFLAGS"] = cppflags
     else:
         tool_env["CMAKE_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu"
         tool_env["CMAKE_PREFIX_PATH"] = (
