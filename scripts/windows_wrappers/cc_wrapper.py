@@ -16,14 +16,21 @@ def transform_args(args: List[str]) -> List[str]:
     result: List[str] = []
     has_target = False
 
+    # MSVC flags that conflict with GNU/Clang CLI
+    msvc_flags = {
+        "-MT", "-MTd", "-MD", "-MDd",
+        "/MT", "/MTd", "/MD", "/MDd",
+        "-Oy-", "/Oy-", "-threads", "/threads",
+        "-lstdc++fs",
+    }
+
     for arg in args:
         if arg in ("-target", "--target") or arg.startswith(
             ("--target=", "-target=")
         ):
             has_target = True
 
-        # std::filesystem is in libc++ on Windows, not separate libstdc++fs
-        if arg == "-lstdc++fs":
+        if arg in msvc_flags:
             continue
 
         if arg.startswith("@"):
@@ -58,6 +65,33 @@ def transform_args(args: List[str]) -> List[str]:
     ):
         if flag not in result:
             result.append(flag)
+
+    is_linking = not any(
+        a in (
+            "-c",
+            "-E",
+            "-S",
+            "-M",
+            "-MM",
+            "-v",
+            "--version",
+            "-dumpversion",
+            "-dumpmachine",
+        )
+        for a in args
+    )
+    if is_linking:
+        for sys_lib in (
+            "-lws2_32",
+            "-lcrypt32",
+            "-lshlwapi",
+            "-liphlpapi",
+            "-lpsapi",
+            "-luser32",
+            "-ladvapi32",
+        ):
+            if sys_lib not in result:
+                result.append(sys_lib)
 
     return result
 
