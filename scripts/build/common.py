@@ -129,8 +129,6 @@ def ensure_moose_repo(repo_dir: Path, moose_dir: Path) -> None:
                 check=True,
             )
             for item in temp_clone.iterdir():
-                if item.name == ".git":
-                    continue
                 dest = moose_dir / item.name
                 if item.is_dir():
                     if item.name in ("petsc", "libmesh") and dest.is_dir():
@@ -144,6 +142,17 @@ def ensure_moose_repo(repo_dir: Path, moose_dir: Path) -> None:
                     )
                 else:
                     shutil.copy2(item, dest, follow_symlinks=False)
+            # Ensure .git is also present in moose_dir
+            git_src = temp_clone / ".git"
+            git_dst = moose_dir / ".git"
+            if git_src.exists() and not git_dst.exists():
+                shutil.copytree(
+                    git_src,
+                    git_dst,
+                    symlinks=True,
+                    ignore_dangling_symlinks=True,
+                    dirs_exist_ok=True,
+                )
         finally:
             if temp_clone.exists():
                 shutil.rmtree(temp_clone, ignore_errors=True)
@@ -153,59 +162,49 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
     """Check and initialize MOOSE git submodules."""
     petsc_cfg = moose_dir / "petsc" / "configure"
     timpi_readme = moose_dir / "libmesh" / "contrib" / "timpi" / "README"
-    if not (petsc_cfg.is_file() and timpi_readme.is_file()):
-        for sub_name in [
-            "petsc",
-            "libmesh",
-            "framework/contrib/wasp",
-        ]:
-            target_sub = moose_dir / sub_name
-            if target_sub.is_dir() and not (target_sub / ".git").exists():
-                print(
-                    f"Removing non-git directory before checkout: "
-                    f"{target_sub}"
-                )
-                shutil.rmtree(target_sub)
+    wasp_cfg = (
+        moose_dir / "framework" / "contrib" / "wasp" / "CMakeLists.txt"
+    )
+    if petsc_cfg.is_file() and timpi_readme.is_file() and wasp_cfg.is_file():
+        return
 
-        print(
-            "Initializing MOOSE git submodules (petsc, libmesh, wasp)..."
-        )
-        subprocess.run(
-            ["git", "submodule", "sync", "--recursive"],
-            cwd=str(moose_dir),
-            check=False,
-        )
-        subprocess.run(
-            ["git", "submodule", "init"],
-            cwd=str(moose_dir),
-            check=False,
-        )
-        submodule_cmd = [
-            "git",
-            "submodule",
-            "update",
-            "--init",
-            "--recursive",
-            "petsc",
-            "libmesh",
-            "framework/contrib/wasp",
-        ]
-        max_attempts = 5
-        for attempt in range(1, max_attempts + 1):
-            try:
-                subprocess.run(
-                    submodule_cmd, cwd=str(moose_dir), check=True
-                )
-                break
-            except subprocess.CalledProcessError:
-                if attempt == max_attempts:
-                    raise
-                print(
-                    f"Submodule checkout failed (attempt {attempt}/"
-                    f"{max_attempts}). Waiting 30s before retry "
-                    "(GitLab load/rate limit backoff)..."
-                )
-                time.sleep(30)
+    print("Initializing MOOSE git submodules (petsc, libmesh, wasp)...")
+    subprocess.run(
+        ["git", "submodule", "sync", "--recursive"],
+        cwd=str(moose_dir),
+        check=False,
+    )
+    subprocess.run(
+        ["git", "submodule", "init"],
+        cwd=str(moose_dir),
+        check=False,
+    )
+    submodule_cmd = [
+        "git",
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "petsc",
+        "libmesh",
+        "framework/contrib/wasp",
+    ]
+    max_attempts = 5
+    for attempt in range(1, max_attempts + 1):
+        try:
+            subprocess.run(
+                submodule_cmd, cwd=str(moose_dir), check=True
+            )
+            break
+        except subprocess.CalledProcessError:
+            if attempt == max_attempts:
+                raise
+            print(
+                f"Submodule checkout failed (attempt {attempt}/"
+                f"{max_attempts}). Waiting 30s before retry "
+                "(GitLab load/rate limit backoff)..."
+            )
+            time.sleep(30)
 
 
 def build_rabbit_binary(

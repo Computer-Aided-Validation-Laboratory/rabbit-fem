@@ -73,7 +73,7 @@ jobs:
             moose/libmesh/installed
             moose/framework/contrib/wasp/install
             moose/framework/include/base/MooseConfig.h
-          key: linux-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py') }}
           restore-keys: |
             linux-moose-build-
 
@@ -91,7 +91,7 @@ jobs:
             moose/libmesh/installed
             moose/framework/contrib/wasp/install
             moose/framework/include/base/MooseConfig.h
-          key: linux-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py') }}
 
       - name: "Linux: Build Rabbit, stage artifacts, and build wheel"
         if: steps.wheel-cache.outputs.cache-hit != 'true'

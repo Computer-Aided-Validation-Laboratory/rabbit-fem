@@ -82,7 +82,7 @@ jobs:
             moose/libmesh/installed
             moose/framework/contrib/wasp/install
             moose/framework/include/base/MooseConfig.h
-          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py') }}
           restore-keys: |
             macos-moose-build-
 
@@ -100,7 +100,7 @@ jobs:
             moose/libmesh/installed
             moose/framework/contrib/wasp/install
             moose/framework/include/base/MooseConfig.h
-          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py') }}
 
       - name: "macOS: Build Rabbit, stage artifacts, and build wheel"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
