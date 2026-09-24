@@ -158,37 +158,76 @@ def ensure_moose_repo(repo_dir: Path, moose_dir: Path) -> None:
                 shutil.rmtree(temp_clone, ignore_errors=True)
 
 
-def ensure_moose_submodules(moose_dir: Path) -> None:
-    """Check and initialize MOOSE git submodules."""
-    petsc_cfg = moose_dir / "petsc" / "configure"
-    timpi_readme = moose_dir / "libmesh" / "contrib" / "timpi" / "README"
-    wasp_cfg = (
-        moose_dir / "framework" / "contrib" / "wasp" / "CMakeLists.txt"
+def is_petsc_ready(moose_dir: Path) -> bool:
+    """Check if PETSc source or build is present."""
+    petsc_dir = moose_dir / "petsc"
+    return (
+        (petsc_dir / "include" / "petsc.h").is_file()
+        or (petsc_dir / "configure").is_file()
+        or (petsc_dir / "arch-linux" / "lib" / "libpetsc.so").is_file()
+        or (petsc_dir / "arch-darwin-opt" / "lib" / "libpetsc.dylib").is_file()
+        or (petsc_dir / "arch-windows-opt" / "lib" / "libpetsc.a").is_file()
     )
-    if petsc_cfg.is_file() and timpi_readme.is_file() and wasp_cfg.is_file():
+
+
+def is_libmesh_ready(moose_dir: Path) -> bool:
+    """Check if libMesh source or build is present."""
+    libmesh_dir = moose_dir / "libmesh"
+    return (
+        (
+            libmesh_dir / "installed" / "include" / "libmesh" / "libmesh.h"
+        ).is_file()
+        or (libmesh_dir / "contrib" / "timpi" / "README").is_file()
+    )
+
+
+def is_wasp_ready(moose_dir: Path) -> bool:
+    """Check if WASP source or build is present."""
+    wasp_dir = moose_dir / "framework" / "contrib" / "wasp"
+    return (
+        (wasp_dir / "install" / "lib").is_dir()
+        or (wasp_dir / "install" / "include").is_dir()
+        or (wasp_dir / "CMakeLists.txt").is_file()
+    )
+
+
+def ensure_moose_submodules(moose_dir: Path) -> None:
+    """Check and initialize missing MOOSE git submodules."""
+    needed: list[str] = []
+    if not is_petsc_ready(moose_dir):
+        needed.append("petsc")
+    if not is_libmesh_ready(moose_dir):
+        needed.append("libmesh")
+    if not is_wasp_ready(moose_dir):
+        needed.append("framework/contrib/wasp")
+
+    if not needed:
+        print("All MOOSE submodules/dependencies are present.")
         return
 
-    print("Initializing MOOSE git submodules (petsc, libmesh, wasp)...")
+    print(f"Initializing missing MOOSE git submodules: {needed}...")
     subprocess.run(
-        ["git", "submodule", "sync", "--recursive"],
+        ["git", "submodule", "sync", "--recursive"] + needed,
         cwd=str(moose_dir),
         check=False,
     )
     subprocess.run(
-        ["git", "submodule", "init"],
+        ["git", "submodule", "init"] + needed,
         cwd=str(moose_dir),
         check=False,
     )
+    for sub in needed:
+        sub_path = moose_dir / sub
+        if sub_path.is_dir() and not (sub_path / ".git").exists():
+            shutil.rmtree(sub_path, ignore_errors=True)
+
     submodule_cmd = [
         "git",
         "submodule",
         "update",
         "--init",
         "--recursive",
-        "petsc",
-        "libmesh",
-        "framework/contrib/wasp",
-    ]
+    ] + needed
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):
         try:

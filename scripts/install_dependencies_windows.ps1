@@ -197,29 +197,30 @@ $AllDepsBuilt = (Test-Path $PetscLib) -and (Test-Path $LibMeshLib) -and (Test-Pa
 
 if (-not (Test-Path $MooseFrameworkMk)) {
     if (-not (Test-Path $MooseDir)) {
-        Invoke-MsysBash "git clone --branch next https://github.com/idaholab/moose.git moose" "Cloning upstream MOOSE repository (next branch)"
+        Invoke-MsysBash "git init moose && cd moose && git remote add origin https://github.com/idaholab/moose.git && git fetch --depth 1 origin $MooseCommit && git checkout FETCH_HEAD" "Fetching MOOSE repository at commit $MooseCommit"
     } else {
-        Invoke-MsysBash "cd moose && git init && git remote add origin https://github.com/idaholab/moose.git 2>/dev/null || true && git fetch --depth 50 origin next" "Fetching MOOSE repository"
+        Invoke-MsysBash "rm -rf .moose_framework_tmp && git init .moose_framework_tmp && cd .moose_framework_tmp && git remote add origin https://github.com/idaholab/moose.git && git fetch --depth 1 origin $MooseCommit && git checkout FETCH_HEAD && cp -rn . ../moose/ 2>/dev/null || true && cp -r .git ../moose/ 2>/dev/null || true && cd .. && rm -rf .moose_framework_tmp" "Overlaying MOOSE framework at commit $MooseCommit"
     }
-    Invoke-MsysBash "cd moose && git checkout -f $MooseCommit" "Checking out MOOSE at commit $MooseCommit"
 }
 
-if (-not $AllDepsBuilt -and (-not (Test-Path $MoosePetscCfg) -or -not (Test-Path $MooseLibmeshCfg))) {
-    foreach ($sub in @("libmesh", "framework\contrib\wasp", "petsc")) {
-        $target = Join-Path $MooseDir $sub
-        if ((Test-Path $target) -and (-not (Test-Path (Join-Path $target ".git")))) {
-            Write-Host "[!] Cleaning non-git submodule directory: $target" -ForegroundColor Yellow
-            Remove-Item -Recurse -Force $target
-        }
-    }
+$needPetsc = -not (Test-Path $PetscLib) -and -not (Test-Path $MoosePetscCfg)
+$needLibmesh = -not (Test-Path $LibMeshLib) -and -not (Test-Path (Join-Path $MooseDir "libmesh\contrib\timpi\README"))
+$needWasp = -not (Test-Path $HitExe) -and -not (Test-Path (Join-Path $MooseDir "framework\contrib\wasp\CMakeLists.txt"))
 
-    $submoduleCmd = "cd moose && git config core.autocrlf false && git submodule update --init --recursive petsc libmesh framework/contrib/wasp"
+$subsNeeded = @()
+if ($needPetsc) { $subsNeeded += "petsc" }
+if ($needLibmesh) { $subsNeeded += "libmesh" }
+if ($needWasp) { $subsNeeded += "framework/contrib/wasp" }
+
+if ($subsNeeded.Count -gt 0) {
+    $subsList = $subsNeeded -join " "
+    $submoduleCmd = "cd moose && git config core.autocrlf false && git submodule sync --recursive $subsList && git submodule update --init --recursive $subsList"
     $maxAttempts = 5
     $attempt = 1
     $success = $false
     while (-not $success -and $attempt -le $maxAttempts) {
         try {
-            Invoke-MsysBash $submoduleCmd "Initializing MOOSE submodules at commit $MooseCommit (Attempt $attempt/$maxAttempts)"
+            Invoke-MsysBash $submoduleCmd "Initializing MOOSE submodules: $subsList (Attempt $attempt/$maxAttempts)"
             $success = $true
         } catch {
             if ($attempt -ge $maxAttempts) {
