@@ -78,6 +78,8 @@ jobs:
             moose/framework/contrib/hit/hit.exe
             moose/framework/include/base/MooseConfig.h
           key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          restore-keys: |
+            windows-moose-build-
 
       - name: "Windows: Build MOOSE dependencies and Rabbit"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'

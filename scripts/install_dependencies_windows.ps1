@@ -21,29 +21,50 @@ Write-Host " Parallel Jobs:   $Jobs" -ForegroundColor Cyan
 Write-Host " Build Method:    $Method" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
-# 1. Check MSYS2
-$MsysBash = "C:\msys64\usr\bin\bash.exe"
-if (-not (Test-Path $MsysBash)) {
-    throw "MSYS2 bash not found at $MsysBash. Please install MSYS2 to C:\msys64."
+# 1. Detect MSYS2 installation dynamically
+$MsysRoot = $null
+if ($env:MSYS2_ROOT -and (Test-Path (Join-Path $env:MSYS2_ROOT "usr\bin\bash.exe"))) {
+    $MsysRoot = $env:MSYS2_ROOT
+} elseif ($env:MSYS_ROOT -and (Test-Path (Join-Path $env:MSYS_ROOT "usr\bin\bash.exe"))) {
+    $MsysRoot = $env:MSYS_ROOT
+} else {
+    $candidates = @("C:\msys64", "D:\msys64", "C:\tools\msys64", "D:\tools\msys64", (Join-Path $env:LOCALAPPDATA "msys64"))
+    foreach ($cand in $candidates) {
+        if ($cand -and (Test-Path (Join-Path $cand "usr\bin\bash.exe"))) {
+            $MsysRoot = $cand
+            break
+        }
+    }
 }
+if (-not $MsysRoot) {
+    $bashCmd = Get-Command bash.exe -ErrorAction SilentlyContinue
+    if ($bashCmd -and $bashCmd.Source -like "*msys*") {
+        $MsysRoot = (Get-Item $bashCmd.Source).Directory.Parent.Parent.FullName
+    }
+}
+if (-not $MsysRoot) {
+    throw "MSYS2 not found. Please install MSYS2 to C:\msys64 or set `$env:MSYS2_ROOT."
+}
+$MsysBash = Join-Path $MsysRoot "usr\bin\bash.exe"
+$env:MSYS2_ROOT = $MsysRoot
 Write-Host "[OK] MSYS2 found at $MsysBash" -ForegroundColor Green
 
 $requiredMsysTools = @("diff.exe", "make.exe", "patch.exe", "m4.exe", "git.exe", "python3.exe", "cmake.exe")
 $needsInstall = $false
 foreach ($tool in $requiredMsysTools) {
-    if (-not (Test-Path "C:\msys64\usr\bin\$tool")) {
+    if (-not (Test-Path (Join-Path $MsysRoot "usr\bin\$tool"))) {
         $needsInstall = $true
         break
     }
 }
 if ($needsInstall) {
     Write-Host "[*] Synchronizing MSYS2 database and installing required packages..." -ForegroundColor Yellow
-    & "C:\msys64\usr\bin\pacman.exe" -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/python-pip msys/cmake
-    & "C:\msys64\usr\bin\python3.exe" -m pip install --break-system-packages --quiet packaging pyyaml
+    & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/python-pip msys/cmake
+    & (Join-Path $MsysRoot "usr\bin\python3.exe") -m pip install --break-system-packages --quiet packaging pyyaml
 }
 foreach ($tool in $requiredMsysTools) {
-    if (-not (Test-Path "C:\msys64\usr\bin\$tool")) {
-        throw "Failed to install required MSYS2 tool C:\msys64\usr\bin\$tool."
+    if (-not (Test-Path (Join-Path $MsysRoot "usr\bin\$tool"))) {
+        throw "Failed to install required MSYS2 tool $tool in $MsysRoot\usr\bin."
     }
 }
 Write-Host "[OK] MSYS2 required tools verified (diff, make, patch, m4, git, python3, cmake)." -ForegroundColor Green

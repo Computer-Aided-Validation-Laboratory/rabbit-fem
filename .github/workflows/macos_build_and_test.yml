@@ -70,7 +70,7 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py', 'build_rabbit.py') }}
 
       - name: "macOS: Restore MOOSE cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
@@ -82,7 +82,9 @@ jobs:
             moose/libmesh/installed
             moose/framework/contrib/wasp/install
             moose/framework/include/base/MooseConfig.h
-          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
+          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            macos-moose-build-
 
       - name: "macOS: Build MOOSE dependencies"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.moose-cache.outputs.cache-hit != 'true'
@@ -98,7 +100,7 @@ jobs:
             moose/libmesh/installed
             moose/framework/contrib/wasp/install
             moose/framework/include/base/MooseConfig.h
-          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
+          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       - name: "macOS: Build Rabbit, stage artifacts, and build wheel"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
