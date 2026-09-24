@@ -43,17 +43,21 @@ This document details all unified patch files stored in [`patches/windows/`](fil
 
 - **Target Component**: `moose/framework/contrib/wasp`
 - **Files Modified**:
+  - `CMakeLists.txt`
   - `waspcore/Format.h`
   - `waspcore/CMakeLists.txt`
 - **Origin**:
   - `Format.h`: **Local Windows Build** (Entry 017 of [`dev/log_windows_port.md`](file:///home/lloydf/rabbit-fem/dev/log_windows_port.md)).
   - `waspcore/CMakeLists.txt`: **Windows CI** ([Run #35955448580](https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/runs/35955448580) on commit `0d4ed03`, failure log [paste.rs/0t7wO](https://paste.rs/0t7wO)).
+  - `CMakeLists.txt`: **Windows CI** ([Run #35969401750](https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/runs/35969401750) on commit `88530bb`, failure log [paste.rs/NF6GF](https://paste.rs/NF6GF)).
 - **What it does**:
-  1. In `Format.h`: Adds a check for `defined(_TWO_DIGIT_EXPONENT)` before calling `_set_output_format()`.
-  2. In `waspcore/CMakeLists.txt`: Changes target include directory visibility from `PRIVATE` to `PUBLIC` and exports the parent WASP root directory (`$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>`).
+  1. In `CMakeLists.txt`: Sets `CMAKE_DEPENDS_USE_COMPILER FALSE` when `CMAKE_SYSTEM_NAME` is Windows.
+  2. In `Format.h`: Adds a check for `defined(_TWO_DIGIT_EXPONENT)` before calling `_set_output_format()`.
+  3. In `waspcore/CMakeLists.txt`: Changes target include directory visibility from `PRIVATE` to `PUBLIC` and exports the parent WASP root directory (`$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>`).
 - **Why it is needed**:
-  1. `_set_output_format` and `_TWO_DIGIT_EXPONENT` were legacy MSVCRT functions removed from modern Universal CRT (UCRT) and MinGW-w64. Calling them caused compilation failures (`use of undeclared identifier '_TWO_DIGIT_EXPONENT'`).
-  2. When building WASP out-of-tree via CMake (`build/`), internal source files (`waspcore/Definition.cpp`, `waspcore/Interpreter.cpp`, etc.) `#include "waspcore/Definition.h"` relative to the WASP root. Because `CMakeLists.txt` only added the local `waspcore` directory privately, the compiler could not resolve `waspcore/*.h`.
+  1. In CMake 3.20+, source dependencies for Makefiles are generated directly by the compiler. Under MSYS2, `zig cc` outputs Windows drive paths (e.g. `D:/a/...`) into `compiler_depend.make`. When GNU Make parses the file, it interprets the drive colon as a rule delimiter and aborts with `*** multiple target patterns. Stop.`. Setting `CMAKE_DEPENDS_USE_COMPILER FALSE` forces CMake to use its internal dependency scanner, preventing raw drive-letter dependencies.
+  2. `_set_output_format` and `_TWO_DIGIT_EXPONENT` were legacy MSVCRT functions removed from modern Universal CRT (UCRT) and MinGW-w64. Calling them caused compilation failures (`use of undeclared identifier '_TWO_DIGIT_EXPONENT'`).
+  3. When building WASP out-of-tree via CMake (`build/`), internal source files (`waspcore/Definition.cpp`, `waspcore/Interpreter.cpp`, etc.) `#include "waspcore/Definition.h"` relative to the WASP root. Because `CMakeLists.txt` only added the local `waspcore` directory privately, the compiler could not resolve `waspcore/*.h`.
 
 ---
 

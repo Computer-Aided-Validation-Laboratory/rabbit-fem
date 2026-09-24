@@ -1,0 +1,126 @@
+name: "macOS: Build Wheel and Test"
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  macos-build-and-test:
+    name: "macOS: Build Wheel and Test"
+    runs-on: macos-14
+    timeout-minutes: 180
+
+    steps:
+      - name: "macOS: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: "macOS: Install system packages"
+        run: |
+          brew update
+          brew install \
+            open-mpi \
+            gcc \
+            libomp \
+            pkg-config \
+            cmake
+
+      - name: "macOS: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "macOS: Set up Python"
+        run: |
+          uv python install 3.13
+          uv venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: "macOS: Install Python build tools"
+        run: |
+          uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh
+
+      - name: "macOS: Restore wheel cache"
+        uses: actions/cache/restore@v4
+        id: wheel-cache
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/lib
+          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'build_rabbit.py') }}
+
+      - name: "macOS: Restore MOOSE cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: moose-cache
+        with:
+          path: |
+            moose/petsc
+            moose/libmesh/installed
+            moose/framework/contrib/wasp/install
+            moose/framework/include/base/MooseConfig.h
+          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
+
+      - name: "macOS: Build MOOSE dependencies"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.moose-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --moose
+
+      - name: "macOS: Save MOOSE cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.moose-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            moose/petsc
+            moose/libmesh/installed
+            moose/framework/contrib/wasp/install
+            moose/framework/include/base/MooseConfig.h
+          key: macos-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
+
+      - name: "macOS: Build Rabbit, stage artifacts, and build wheel"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --wheel
+
+      - name: "macOS: Run test suite"
+        run: |
+          uv run python build_rabbit.py --test
+
+      - name: "macOS: Save wheel cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/lib
+          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'build_rabbit.py') }}
+
+      - name: "macOS: Upload wheel artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rabbit-fem-macos-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+      - name: "macOS: Upload build failure logs"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build-failure-logs
+          path: |
+            moose/petsc/arch-moose/lib/petsc/conf/configure.log
+            moose/petsc/configure.log
+            moose/libmesh/config.log
+          if-no-files-found: ignore

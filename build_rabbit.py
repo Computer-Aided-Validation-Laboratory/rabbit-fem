@@ -346,15 +346,35 @@ def build_moose_dependencies(
     tool_env["OMPI_CXX"] = str(zigcxx_path)
     tool_env["CC"] = "mpicc"
     tool_env["CXX"] = "mpicxx"
-    tool_env["CMAKE_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu"
-    tool_env["CMAKE_PREFIX_PATH"] = (
-        "/usr/lib/x86_64-linux-gnu:"
-        + os.environ.get("CMAKE_PREFIX_PATH", "")
-    )
-    tool_env["LIBRARY_PATH"] = (
-        "/usr/lib/x86_64-linux-gnu:"
-        + os.environ.get("LIBRARY_PATH", "")
-    )
+    if sys.platform == "darwin":
+        brew_prefix = (
+            "/opt/homebrew"
+            if Path("/opt/homebrew").is_dir()
+            else "/usr/local"
+        )
+        tool_env["CMAKE_LIBRARY_PATH"] = f"{brew_prefix}/lib"
+        tool_env["CMAKE_PREFIX_PATH"] = (
+            f"{brew_prefix}:"
+            + os.environ.get("CMAKE_PREFIX_PATH", "")
+        )
+        tool_env["LIBRARY_PATH"] = (
+            f"{brew_prefix}/lib:"
+            + os.environ.get("LIBRARY_PATH", "")
+        )
+        tool_env["CPATH"] = (
+            f"{brew_prefix}/include:"
+            + os.environ.get("CPATH", "")
+        )
+    else:
+        tool_env["CMAKE_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu"
+        tool_env["CMAKE_PREFIX_PATH"] = (
+            "/usr/lib/x86_64-linux-gnu:"
+            + os.environ.get("CMAKE_PREFIX_PATH", "")
+        )
+        tool_env["LIBRARY_PATH"] = (
+            "/usr/lib/x86_64-linux-gnu:"
+            + os.environ.get("LIBRARY_PATH", "")
+        )
 
     # 1. Build PETSc
     print("--> Building PETSc...")
@@ -493,25 +513,46 @@ def find_needed_libraries(
         visited_binaries.add(current)
 
         try:
-            cmd = ["readelf", "-d", str(current)]
-            res = subprocess.run(
-                cmd, capture_output=True, text=True, check=True
-            )
-            for line in res.stdout.splitlines():
-                if "NEEDED" not in line:
-                    continue
-                match = re.search(r"\[(.*)\]", line)
-                if not match:
-                    continue
-                soname = match.group(1)
-                if soname.startswith(system_prefixes):
-                    continue
+            if sys.platform == "darwin":
+                cmd = ["otool", "-L", str(current)]
+                res = subprocess.run(
+                    cmd, capture_output=True, text=True, check=True
+                )
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if not line or line.endswith(":"):
+                        continue
+                    dep = line.split()[0]
+                    if dep.startswith(
+                        ("/usr/lib/", "/System/Library/", "@loader_path")
+                    ):
+                        continue
+                    soname = Path(dep).name
+                    if soname not in resolved_libs:
+                        if soname in available_libs:
+                            real_path = available_libs[soname].resolve()
+                            resolved_libs[soname] = real_path
+                            queue.append(real_path)
+            else:
+                cmd = ["readelf", "-d", str(current)]
+                res = subprocess.run(
+                    cmd, capture_output=True, text=True, check=True
+                )
+                for line in res.stdout.splitlines():
+                    if "NEEDED" not in line:
+                        continue
+                    match = re.search(r"\[(.*)\]", line)
+                    if not match:
+                        continue
+                    soname = match.group(1)
+                    if soname.startswith(system_prefixes):
+                        continue
 
-                if soname not in resolved_libs:
-                    if soname in available_libs:
-                        real_path = available_libs[soname].resolve()
-                        resolved_libs[soname] = real_path
-                        queue.append(real_path)
+                    if soname not in resolved_libs:
+                        if soname in available_libs:
+                            real_path = available_libs[soname].resolve()
+                            resolved_libs[soname] = real_path
+                            queue.append(real_path)
         except Exception:
             pass
 
@@ -537,8 +578,9 @@ def stage_artifacts(
     dest_bin.chmod(0o755)
 
     available_libs: dict[str, Path] = {}
+    lib_glob = "*.dylib*" if sys.platform == "darwin" else "*.so*"
     for search_root in [repo_dir, moose_dir]:
-        for p in search_root.rglob("*.so*"):
+        for p in search_root.rglob(lib_glob):
             if p.is_file() and not p.name.endswith((".son", ".i")):
                 available_libs[p.name] = p
 
@@ -558,34 +600,63 @@ def stage_artifacts(
         shutil.copy2(real_path, dest)
 
     print("Stripping debug symbols from libraries and executable...")
-    subprocess.run(["strip", "--strip-all", str(dest_bin)], check=False)
-    for f in lib_target_dir.glob("*.so*"):
-        if f.is_file():
-            subprocess.run(["strip", "--strip-unneeded", str(f)], check=False)
+    if sys.platform == "darwin":
+        subprocess.run(["strip", "-x", str(dest_bin)], check=False)
+        for f in lib_target_dir.glob("*.dylib*"):
+            if f.is_file():
+                subprocess.run(["strip", "-x", str(f)], check=False)
 
-    patchelf_bin = "patchelf"
-    for cand in (
-        shutil.which("patchelf"),
-        Path(sys.prefix) / "bin" / "patchelf",
-        repo_dir / ".venv" / "bin" / "patchelf",
-    ):
-        if cand and Path(cand).is_file():
-            patchelf_bin = str(cand)
-            break
+        subprocess.run(
+            [
+                "install_name_tool",
+                "-add_rpath",
+                "@loader_path/../lib",
+                str(dest_bin),
+            ],
+            check=False,
+        )
+        for f in lib_target_dir.glob("*.dylib*"):
+            if f.is_file():
+                subprocess.run(
+                    [
+                        "install_name_tool",
+                        "-add_rpath",
+                        "@loader_path",
+                        str(f),
+                    ],
+                    check=False,
+                )
+    else:
+        subprocess.run(["strip", "--strip-all", str(dest_bin)], check=False)
+        for f in lib_target_dir.glob("*.so*"):
+            if f.is_file():
+                subprocess.run(
+                    ["strip", "--strip-unneeded", str(f)], check=False
+                )
 
-    rpath_app = "$ORIGIN/../lib:/usr/lib/x86_64-linux-gnu/openmpi/lib"
-    rpath_lib = "$ORIGIN:/usr/lib/x86_64-linux-gnu/openmpi/lib"
+        patchelf_bin = "patchelf"
+        for cand in (
+            shutil.which("patchelf"),
+            Path(sys.prefix) / "bin" / "patchelf",
+            repo_dir / ".venv" / "bin" / "patchelf",
+        ):
+            if cand and Path(cand).is_file():
+                patchelf_bin = str(cand)
+                break
 
-    subprocess.run(
-        [patchelf_bin, "--set-rpath", rpath_app, str(dest_bin)],
-        check=True,
-    )
-    for f in lib_target_dir.glob("*.so*"):
-        if f.is_file():
-            subprocess.run(
-                [patchelf_bin, "--set-rpath", rpath_lib, str(f)],
-                check=True,
-            )
+        rpath_app = "$ORIGIN/../lib:/usr/lib/x86_64-linux-gnu/openmpi/lib"
+        rpath_lib = "$ORIGIN:/usr/lib/x86_64-linux-gnu/openmpi/lib"
+
+        subprocess.run(
+            [patchelf_bin, "--set-rpath", rpath_app, str(dest_bin)],
+            check=True,
+        )
+        for f in lib_target_dir.glob("*.so*"):
+            if f.is_file():
+                subprocess.run(
+                    [patchelf_bin, "--set-rpath", rpath_lib, str(f)],
+                    check=True,
+                )
 
 
     print(
@@ -616,6 +687,16 @@ def build_wheel(repo_dir: Path) -> Path:
             platform_tag = "win_amd64"
             wheel_bin = shutil.which("wheel") or str(
                 repo_dir / ".venv" / "Scripts" / "wheel.exe"
+            )
+        elif sys.platform == "darwin":
+            import platform
+            arch = platform.machine()
+            if arch == "arm64":
+                platform_tag = "macosx_14_0_arm64"
+            else:
+                platform_tag = "macosx_13_0_x86_64"
+            wheel_bin = shutil.which("wheel") or str(
+                repo_dir / ".venv" / "bin" / "wheel"
             )
         else:
             platform_tag = (
