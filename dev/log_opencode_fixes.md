@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: disable NetGen in libMesh build (SDK macro vs new libc++)
+
+- **CI runs**: macOS `36111456669` (33m), `36110525881` (44m), `36130962168` (32m) — all fail identically in the libMesh dependency stage (`update_and_rebuild_libmesh.sh --with-mpi`).
+- **Root cause**: libMesh's bundled NetGen `nglib` TU `gzstream.cpp` dies parsing Homebrew LLVM 23.1.0's libc++ `<complex>` (`expected unqualified-id` at `std::isnan`/`std::isinf` uses): the Xcode 16.4 SDK `math.h` defines `isnan`/`isinf`/`signbit` as function-like macros, which macro-expand the `std::`-qualified names during `<complex>` parsing. Only one TU fails today, but the poison (macro active before `<complex>`) is systemic to the NetGen build under this toolchain/SDK pairing. Verified the chain `gzstream.cpp` → `myadt.hpp` → `mydefs.hpp` → `ngcore.hpp` → `archive.hpp` → `<complex>`, and that NetGen pulls only `<cmath>` itself (no raw `<math.h>` to reorder).
+- **Why disable instead of patch/pin**: `--disable-netgen` is a documented libMesh configure option that flows untouched through MOOSE's `update_and_rebuild_libmesh.sh` (`"$@"` forwarding, verified in-script; neither MOOSE script mentions netgen). It removes the entire failure class rather than chasing SDK-macro whims TU-by-TU (patch) and avoids pinning a floating-then-deleted Homebrew LLVM formula (brittle in the other direction). MOOSE degrades gracefully: `Capabilities` reports netgen missing, `XYZDelaunayGenerator` errors only if used — and no Rabbit sim/test/example touches NetGen or Delaunay (grep-verified; Gmsh/generated/Exodus cover all packaged meshes).
+- **Platform considerations**: macOS-only file (`scripts/build/darwin.py`); Linux/Windows behavior byte-identical (no shared code touched).
+- **Files changed**: `scripts/build/darwin.py` (one flag + rationale comment), `test/test_darwin.py` (new: asserts `--disable-netgen` plumbed through, asserts built-install short-circuit).
+- **Verification**: flag proven real via `configure --help` on the exact pinned libmesh SHA (`90766057`, same on CI); `pytest test/test_darwin.py test/test_moose_pins.py test/test_staging.py` → 11 passed (mocked subprocess, no network/build); macOS CI on the new PR is the compile-level verifier.
+- **Remaining uncertainty**: none on mechanism; whether any *transitive* MOOSE consumer needs NetGen at macOS runtime will surface in the macOS test suite (expected clean — same suite as green Linux/Windows).
+
 ## 2026-09-25 — FIX-OWN-REGRESSION: verifier raised on dangling gitlinks
 
 - **What happened**: the `verify_moose_deps` shipped in the re-pin commit raised `RuntimeError: Cannot determine checked-out commit` whenever `git rev-parse` failed — including the *expected* cache-hit case, where `actions/cache` restores submodule content without its git dir (dangling `.git` gitlink). This red-blocked every Linux run on the re-pin commit within ~1 min (e.g. `36117932030`), and would have done the same on Windows via the ps1 hook.

@@ -186,10 +186,18 @@ def build_libmesh(
         print("--> Building libMesh with OpenMPI toolchain...")
         libmesh_env = get_darwin_tool_env(zigcc_path, zigcxx_path)
         libmesh_env["METHODS"] = "opt"
+        # NetGen is not used by Rabbit (Gmsh/generated/Exodus cover all
+        # packaged meshes) and its bundled sources do not compile against
+        # newer Homebrew LLVM libc++ paired with the Xcode SDK (SDK math.h
+        # isnan/isinf/signbit function-like macros break <complex> parsing
+        # in nglib's gzstream.cpp). Disable it via the documented
+        # libMesh configure option; MOOSE degrades gracefully (reports the
+        # missing capability, errors only if XYZDelaunayGenerator is used).
         subprocess.run(
             [
                 "./scripts/update_and_rebuild_libmesh.sh",
                 "--with-mpi",
+                "--disable-netgen",
             ],
             cwd=str(moose_dir),
             env=libmesh_env,
