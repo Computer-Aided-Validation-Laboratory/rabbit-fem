@@ -76,12 +76,17 @@ The reason the build succeeded locally while breaking in GitHub Actions CI comes
 - **Problem**: When compiled with PETSc MPIUNI (serial uniprocessor mode, `#undef HAVE_MPI`), TIMPI's non-blocking range-based send functions are stubbed out (`timpi_not_implemented()`). MOOSE's `ray_tracing` module called `comm().nonblocking_send_packed_range(...)` in `SendBuffer::forceSend`. Because `forceSend` is instantiated only when template methods are expanded across unity translation units, Clang emitted an undefined reference at link time.
 - **Fix**: Guarded MPI buffer dispatch in `SendBuffer::forceSend` with `#if LIBMESH_HAVE_MPI`.
 
+### Vector 11: CI-Specific Nested Single-Letter Path Double Conversion
+- **Problem**: In GitHub Actions CI, the workspace path is `D:\a\rabbit-fem\rabbit-fem` (`/d/a/rabbit-fem/...`). When arguments like `-LD:/a/...` or `/d/a/...` were processed by `posix_to_win` in `scripts/windows_wrappers/wrapper_utils.py`, the drive letter regex `r"^/([a-zA-Z])(/.*)?$"` matched the single letter `/a` as a drive letter, corrupting `D:/a/...` into `D:A:/...` (e.g. `unable to open library directory 'D:A:/rabbit-fem/...': BadPathName`). This caused PETSc `checkLib` for `f2cblaslapack` to fail with `--download-f2cblaslapack libraries cannot be used`.
+- **Why it passed locally**: Local paths (`C:\Users\longb\...` or `D:\rabbit-fem\...`) contain multi-letter subdirectories (`/Users`, `/rabbit-fem`) which never triggered the single-letter drive regex.
+- **Fix**: In `posix_to_win`, if the prefix ends with a colon (`:`), the body is already part of a Windows drive path and must not be treated as a new POSIX drive root.
+
 ---
 
 ## 3. Current Remediation Strategy
 
-All ten divergence vectors are now unified directly into the repository scripts and patch files:
-1. **`scripts/windows_wrappers/wrapper_utils.py`**: Intercepts all paths, normalizes both `C:` and `D:` drives (`/d/...` -> `D:/...`), and resolves `/tmp` -> `C:/msys64/tmp`.
+All eleven divergence vectors are now unified directly into the repository scripts and patch files:
+1. **`scripts/windows_wrappers/wrapper_utils.py`**: Intercepts all paths, normalizes both `C:` and `D:` drives (`/d/...` -> `D:/...`), handles nested single-letter directories cleanly without double drive conversion, and resolves `/tmp` -> `C:/msys64/tmp`.
 2. **`moose/scripts/make_unity.py` & `patches/windows/moose.patch`**: Fast, reliable unity file generation without MSYS2 subshell exhaustion.
 3. **`patches/windows/petsc.patch`**: Broadens library path parsing in `libraries.py` to handle both POSIX and Windows drive letters.
 4. **`patches/windows/wasp.patch`**: Sets `CMAKE_DEPENDS_USE_COMPILER FALSE` to prevent CMake from writing drive-letter colons into Makefiles.

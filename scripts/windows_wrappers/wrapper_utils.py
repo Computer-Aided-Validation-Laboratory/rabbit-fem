@@ -61,6 +61,9 @@ def posix_to_win(path: str) -> str:
     def repl(m: re.Match) -> str:
         prefix = m.group(1)
         body = m.group(2)
+        # If prefix ends with a colon (e.g. D:), body is already part of a Windows drive path
+        if prefix.rstrip().endswith(":"):
+            return f"{prefix}{body}"
         # Drive letter path: /c/... or /d/...
         m_drive = re.match(r"^/([a-zA-Z])(/.*)?$", body)
         if m_drive:
