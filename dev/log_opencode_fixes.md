@@ -1,5 +1,11 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: TRIAGED/QUEUED, Netgen vs Homebrew LLVM 23 libc++ (not fixed)
+
+- **CI runs**: macOS `36111456669` (33m), `36110525881` (44m) — both fail in the libMesh dependency stage (`update_and_rebuild_libmesh.sh --with-mpi`), not in Rabbit code.
+- **Error**: Netgen `nglib` `gzstream.cpp` → `myadt.hpp` → … → Homebrew LLVM 23.1.0 `c++/v1/complex:1035` → `error: expected unqualified-id` at `std::isnan(__rho)`: the macOS SDK `math.h` defines `isnan` as a function-like macro, which breaks libc++ `<complex>`.
+- **Why not fixed now**: third-party (Netgen bundled in libMesh) vs toolchain/SDK incompatibility — a separate workstream from the Linux/Windows packaging failures in scope, with rabbit-hole risk (SDK pin vs Netgen patch vs disabling Netgen). Queued behind Linux/Windows green.
+
 ## 2026-09-25 — Linux: `stage_artifacts` aborts on `libomp.so.5` (dead fallback + SONAME mismatch)
 
 - **CI runs**: Linux `36106596972`, `36110525796`, `36111456621` — identical `FileNotFoundError: Cannot create a standalone wheel; required shared libraries were not found: libomp.so.5` after a successful ~20 min `rabbit-opt` compile, in `scripts/build/common.py::stage_artifacts`.
