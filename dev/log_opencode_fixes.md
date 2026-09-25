@@ -1,5 +1,41 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — Linux: `stage_artifacts` aborts on `libomp.so.5` (dead fallback + SONAME mismatch)
+
+- **CI runs**: Linux `36106596972`, `36110525796`, `36111456621` — identical `FileNotFoundError: Cannot create a standalone wheel; required shared libraries were not found: libomp.so.5` after a successful ~20 min `rabbit-opt` compile, in `scripts/build/common.py::stage_artifacts`.
+- **First failure addressed here**: all three are the same signature; root cause verified on both sides (see below).
+
+### Root cause
+
+- `stage_artifacts` resolves `DT_NEEDED` entries only from `repo_dir`/`moose_dir` trees plus the binary's RPATH dirs, then raises on anything unresolved. The OpenMP runtime is a documented system dependency (`libomp-dev` installed in CI) living at `/usr/lib/x86_64-linux-gnu/`, i.e. outside all three search roots.
+- The existing `omp_candidates` fallback could never fire: it sits *after* the `raise`, and it looks for `libomp.so` while the CI binary needs the versioned SONAME `libomp.so.5` (linked via default `-lomp` search, since CI runners have no `/opt/rocm-*` or `/usr/lib/llvm-*/lib/libomp.so` for the toolchain link flag).
+- Why local passes: verified with `readelf` on local `rabbit-opt` — local links `/opt/rocm-7.2.4`'s `libomp.so` directly (`omp_link_flag`), so NEEDED is the unversioned `libomp.so`, which resolves via the binary's own RUNPATH (`...:/opt/rocm-7.2.4/lib/llvm/lib:...`). CI and local produce different SONAMEs for the same dependency — environment-specific behavior the staging logic did not account for.
+
+### Why this fix addresses the root cause
+
+- New `index_system_openmp_libs()` in `scripts/build/common.py` indexes canonical system locations (`/usr/lib/x86_64-linux-gnu/libomp.so*`, `/usr/lib/llvm-*/lib/libomp.so*`, `/opt/rocm-*/...`) keyed by exact filename, called *before* resolution. The binary's real SONAME (`libomp.so.5` on CI, `libomp.so` locally) now resolves instead of aborting. Repository/RPATH entries take precedence and are never overridden.
+- Deleted the dead post-raise `omp_candidates` block (unreachable on failure; pointless duplicate-add on success).
+- No hardcoded runner paths beyond standard FHS locations already used in this file; `darwin` behavior unchanged (helper no-ops, same gate as before).
+
+### Platform-specific considerations
+
+- Linux-only effect (`sys.platform == "darwin"` early-return; Windows doesn't use this function — its wheel bundles `rabbit.exe` with no `.so` staging). No cross-OS behavior change.
+
+### Files changed
+
+- `scripts/build/common.py` (helper + call site + dead-block removal).
+- `test/test_staging.py` (new: exact-SONAME indexing, repo precedence, missing-dir tolerance).
+
+### How to verify
+
+- ` .venv/bin/python -m pytest test/test_staging.py` → 3 passed (run; uses repo venv like CI).
+- Re-ran the exact new resolution path against local `rabbit-opt`: 53 resolved, 0 unresolved, `libomp.so` still via rocm RUNPATH — no regression.
+- CI: next Linux run should proceed past `stage_artifacts` to wheel packaging + tests.
+
+### Remaining uncertainty
+
+- None on the mechanism (three identical CI occurrences + local `readelf` divergence proof). Whether the staged `libomp.so.5` + rewritten `$ORIGIN` RPATH loads correctly at runtime on a bare runner is covered by the existing relocatability test suite (`test_simulations.py`) in the same CI job.
+
 ## 2026-09-25 — Windows: Rabbit-stage read-only preflight for dependency flags (diagnosing `petscsys.h`)
 
 - **CI run prompting this**: Windows `36111456611` (failure, 10m27s) — framework unity compile fails with `fatal error: 'petscsys.h' file not found` despite all dependency stages cache-restored and both prior fixes verifiably active in the same log.

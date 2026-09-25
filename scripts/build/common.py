@@ -413,6 +413,37 @@ def elf_library_search_dirs(binary_path: Path) -> list[Path]:
     return search_dirs
 
 
+_SYSTEM_OPENMP_PATTERNS = (
+    "/usr/lib/x86_64-linux-gnu/libomp.so*",
+    "/usr/lib/llvm-*/lib/libomp.so*",
+    "/opt/rocm-*/lib/llvm/lib/libomp.so*",
+    "/opt/rocm-*/lib/llvm/lib-debug/libomp.so*",
+)
+
+
+def index_system_openmp_libs(
+    available_libs: dict[str, Path],
+    patterns: tuple[str, ...] = _SYSTEM_OPENMP_PATTERNS,
+) -> None:
+    """Index system OpenMP runtimes by filename for wheel staging.
+
+    The OpenMP runtime (e.g. libomp.so.5 from libomp-dev) lives outside the
+    repository, so its NEEDED entry cannot resolve from the source trees or
+    the binary RPATH. Record canonical locations keyed by exact filename so
+    resolution matches the binary's SONAME. Existing repository entries take
+    precedence and are never overridden.
+    """
+    import glob
+
+    if sys.platform == "darwin":
+        return
+    for pattern in patterns:
+        for candidate in sorted(glob.glob(pattern)):
+            path = Path(candidate)
+            if path.is_file() and path.name not in available_libs:
+                available_libs[path.name] = path
+
+
 def stage_artifacts(
     repo_dir: Path,
     moose_dir: Path,
@@ -448,6 +479,11 @@ def stage_artifacts(
                 if p.is_file():
                     available_libs[p.name] = p
 
+    # The OpenMP runtime is a documented system dependency that lives
+    # outside the source trees. Index it before resolution so its SONAME
+    # (e.g. libomp.so.5) resolves instead of aborting the wheel staging.
+    index_system_openmp_libs(available_libs)
+
     resolved_libs, unresolved_libs = find_needed_libraries(
         binary_path, available_libs
     )
@@ -457,17 +493,6 @@ def stage_artifacts(
             "Cannot create a standalone wheel; required shared libraries "
             f"were not found: {missing}"
         )
-
-    if sys.platform != "darwin":
-        import glob
-        omp_candidates = (
-            glob.glob("/opt/rocm-*/lib/llvm/lib-debug/libomp.so")
-            + glob.glob("/opt/rocm-*/lib/llvm/lib/libomp.so")
-            + glob.glob("/usr/lib/llvm-*/lib/libomp.so")
-            + glob.glob("/usr/lib/x86_64-linux-gnu/libomp.so*")
-        )
-        if omp_candidates and "libomp.so" not in resolved_libs:
-            resolved_libs["libomp.so"] = Path(omp_candidates[-1]).resolve()
 
     for soname, real_path in resolved_libs.items():
         dest = lib_target_dir / soname
