@@ -1,0 +1,13 @@
+# Pinned MOOSE build-dependency commits.
+#
+# These are the submodule SHAs recorded at the moose_version.txt commit on
+# the MOOSE master branch. The moose commit alone determines them, but they
+# are recorded explicitly so dependency drift is auditable and verifiable:
+# tooling must materialize exactly these commits (see verify_moose_deps in
+# scripts/build/common.py). Update all entries together when moving the
+# moose pin.
+#
+# master tip 975c9a1ca693c21bef850b7beba724e0fb703591 (2026-09-24).
+petsc 4146d835194c349a4ba9c55592652e4f630a7743
+libmesh 90766057ef390adc9968b529e8ded2a87b0a77c7
+wasp ce25dcde73ba81c70c330204ea5bf856762b95ac

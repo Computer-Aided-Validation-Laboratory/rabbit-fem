@@ -26,6 +26,7 @@ from scripts.build.common import (
     get_moose_dir,
     run_tests,
     stage_artifacts,
+    verify_moose_deps,
 )
 
 
@@ -270,6 +271,9 @@ def main() -> None:
     if args.moose and args.moose != "default":
         custom_moose = args.moose
     moose_dir = get_moose_dir(repo_dir, custom_moose)
+
+    # Fail early if materialized submodules drift from moose_deps.txt
+    verify_moose_deps(moose_dir, repo_dir)
 
     # 2. Discrete dependency stages
     if args.build_petsc:

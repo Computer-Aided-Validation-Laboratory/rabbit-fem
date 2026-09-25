@@ -62,7 +62,7 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
       - name: "Linux: Restore PETSc cache"
@@ -71,7 +71,7 @@ jobs:
         id: petsc-cache
         with:
           path: moose/petsc
-          key: linux-petsc-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
           restore-keys: |
             linux-petsc-
 
@@ -85,7 +85,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/petsc
-          key: linux-petsc-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       # --- Stage 2: libMesh Dependency ---
       - name: "Linux: Restore libMesh cache"
@@ -94,7 +94,7 @@ jobs:
         id: libmesh-cache
         with:
           path: moose/libmesh/installed
-          key: linux-libmesh-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
           restore-keys: |
             linux-libmesh-
 
@@ -108,7 +108,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/libmesh/installed
-          key: linux-libmesh-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "Linux: Restore WASP cache"
@@ -119,7 +119,7 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: linux-wasp-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
           restore-keys: |
             linux-wasp-
 
@@ -135,7 +135,7 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: linux-wasp-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       # --- Stage 4: MOOSE Framework Configuration ---
       - name: "Linux: Restore MOOSE Config cache"
@@ -144,7 +144,7 @@ jobs:
         id: mooseconfig-cache
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: linux-mooseconfig-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
           restore-keys: |
             linux-mooseconfig-
 
@@ -158,7 +158,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: linux-mooseconfig-${{ hashFiles('moose_version.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       # --- Stage 5: Build Rabbit Application and Wheel ---
       - name: "Linux: Build Rabbit, stage artifacts, and build wheel"
@@ -178,7 +178,7 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       - name: "Linux: Upload wheel artifact"
         uses: actions/upload-artifact@v4

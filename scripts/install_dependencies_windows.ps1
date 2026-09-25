@@ -187,7 +187,7 @@ function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
 # 5.5. Ensure MOOSE repository and submodules
 $MooseDir = Join-Path $RepoRoot "moose"
 $MooseVersionFile = Join-Path $RepoRoot "moose_version.txt"
-$MooseCommit = "73c6aa53af67b8046f7ace5fd1c96846d5d6641d"
+$MooseCommit = "975c9a1ca693c21bef850b7beba724e0fb703591"
 if (Test-Path $MooseVersionFile) {
     $MooseCommit = (Get-Content $MooseVersionFile).Trim()
 }
@@ -235,6 +235,11 @@ if ($subsNeeded.Count -gt 0) {
         }
     }
 }
+
+# Fail early if materialized submodules drift from moose_deps.txt.
+# (Absent checkouts are skipped here; the stage blocks materialize them.)
+& $VenvPython -c "from scripts.build.common import verify_moose_deps, get_moose_dir; from pathlib import Path; verify_moose_deps(get_moose_dir(Path('.')), Path('.'))"
+if ($LASTEXITCODE -ne 0) { throw "MOOSE dependency pins do not match moose_deps.txt (see error above)." }
 
 # 5.6. Ensure Windows source patches (unconditional).
 # CI restores built libs via actions/cache and then invokes `-Stage rabbit`

@@ -1,5 +1,21 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — Re-pin MOOSE to master tip + explicit dep lock file
+
+- **Request**: stop tracking the MOOSE default (`next`) line; target `master` at a fixed commit, plus pin all build deps explicitly so a future upstream merge cannot silently move us.
+- **Findings** (verified, not assumed):
+  - Old pin `73c6aa53` is 6652 commits behind `master` (`gh api .../compare/master...73c6aa53` → `behind`, `ahead: 0`), i.e. stale either way; moving to current master tip.
+  - Master tip `975c9a1ca693c21bef850b7beba724e0fb703591` (2026-09-24, from `git ls-remote` + `git clone --branch master` to `/tmp`, local build untouched).
+  - Dep SHAs recorded at master tip are **identical** to our current ones (`petsc 4146d835`, `libmesh 90766057`, `wasp ce25dcde` — same on both sides), so this re-pin is zero-churn for PETSc/libMesh/WASP: submodule patches need no changes.
+  - `patches/windows/moose.patch` dry-run (`patch -p1 --dry-run`) against the pristine master tree: every file hunk applies exactly (no fuzz/offset); only the two gitlink hunks defer (`not a regular file`, expected without initialized submodules — same as current behavior).
+- **Changes**:
+  - `moose_version.txt` → `975c9a1c...`; same-SHA fallbacks updated in `scripts/build/common.py` and `scripts/install_dependencies_windows.ps1`.
+  - New `moose_deps.txt` lock file (petsc/libmesh/wasp SHAs + provenance header).
+  - New `get_pinned_moose_deps()` + `verify_moose_deps()` in `common.py` (strict on drifted *materialized* submodules, skips absent checkouts whose materialization belongs to ensure steps), wired into `build_rabbit.py::main()` (all Linux/macOS flows, single choke point, no signature ripples) and into `install_dependencies_windows.ps1` §5.5 (with explicit `$LASTEXITCODE` guard, since `$ErrorActionPreference` alone doesn't stop on native-command failure). Absent checkouts never false-fail.
+  - `moose_deps.txt` added to all dependency + wheel cache keys in both workflows so pin moves invalidate caches (the moose-version bump alone already busts them this round → full rebuilds everywhere, validating the new tree end-to-end).
+- **Verification**: `pytest test/test_moose_pins.py test/test_staging.py` → 8 passed; `verify_moose_deps` run against the real local submodules → OK; YAML parses; `git diff --check` clean.
+- **Remaining uncertainty**: none on the pin itself. The pending hollow-submodule-ensure work (content-based init for cache-hit Windows runs) now targets these pins and follows next.
+
 ## 2026-09-25 — macOS: TRIAGED/QUEUED, Netgen vs Homebrew LLVM 23 libc++ (not fixed)
 
 - **CI runs**: macOS `36111456669` (33m), `36110525881` (44m) — both fail in the libMesh dependency stage (`update_and_rebuild_libmesh.sh --with-mpi`), not in Rabbit code.

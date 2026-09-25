@@ -64,7 +64,7 @@ jobs:
           path: |
             dist
             src/rabbit/bin
-          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
+          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
 
       # --- Stage 1: PETSc Dependency ---
       - name: "Windows: Restore PETSc cache"
@@ -73,7 +73,7 @@ jobs:
         id: petsc-windows-cache
         with:
           path: moose/petsc/arch-windows-opt
-          key: windows-petsc-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          key: windows-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
           restore-keys: |
             windows-petsc-
 
@@ -87,7 +87,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/petsc/arch-windows-opt
-          key: windows-petsc-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          key: windows-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
 
       # --- Stage 2: libMesh Dependency ---
       - name: "Windows: Restore libMesh cache"
@@ -96,7 +96,7 @@ jobs:
         id: libmesh-windows-cache
         with:
           path: moose/libmesh/installed
-          key: windows-libmesh-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          key: windows-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
           restore-keys: |
             windows-libmesh-
 
@@ -110,7 +110,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/libmesh/installed
-          key: windows-libmesh-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          key: windows-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "Windows: Restore WASP cache"
@@ -122,7 +122,7 @@ jobs:
             moose/framework/contrib/wasp/install
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
-          key: windows-wasp-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          key: windows-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
           restore-keys: |
             windows-wasp-
 
@@ -139,7 +139,7 @@ jobs:
             moose/framework/contrib/wasp/install
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
-          key: windows-wasp-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          key: windows-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
 
       # --- Stage 4: MOOSE Framework Configuration ---
       - name: "Windows: Restore MOOSE Config cache"
@@ -148,7 +148,7 @@ jobs:
         id: mooseconfig-windows-cache
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
           restore-keys: |
             windows-mooseconfig-
 
@@ -162,7 +162,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
 
       # --- Stage 5: Build Rabbit Application and Wheel ---
       - name: "Windows: Build Rabbit application"
@@ -186,7 +186,7 @@ jobs:
           path: |
             dist
             src/rabbit/bin
-          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
+          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
 
       - name: "Windows: Upload wheel artifact"
         uses: actions/upload-artifact@v4

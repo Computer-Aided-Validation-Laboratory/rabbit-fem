@@ -33,13 +33,77 @@ def get_moose_dir(
 
 
 def get_pinned_moose_version(repo_dir: Path) -> str:
-    """Read pinned MOOSE commit hash from moose_version.txt."""
+    """Read pinned MOOSE commit hash from moose_version.txt.
+
+    The pin tracks the MOOSE master branch at a fixed commit for stability;
+    see moose_deps.txt for the corresponding dependency commits.
+    """
     version_file = repo_dir / "moose_version.txt"
     if version_file.is_file():
         commit = version_file.read_text(encoding="utf-8").strip()
         if commit:
             return commit
-    return "73c6aa53af67b8046f7ace5fd1c96846d5d6641d"
+    return "975c9a1ca693c21bef850b7beba724e0fb703591"
+
+
+_MOOSE_DEP_SUBMODULES = {
+    "petsc": "petsc",
+    "libmesh": "libmesh",
+    "wasp": "framework/contrib/wasp",
+}
+
+
+def get_pinned_moose_deps(repo_dir: Path) -> dict[str, str]:
+    """Read pinned MOOSE dependency commits from moose_deps.txt."""
+    deps: dict[str, str] = {}
+    deps_file = repo_dir / "moose_deps.txt"
+    if not deps_file.is_file():
+        return deps
+    for line in deps_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) == 2:
+            deps[parts[0]] = parts[1]
+    return deps
+
+
+def verify_moose_deps(moose_dir: Path, repo_dir: Path) -> None:
+    """Fail early if materialized submodules differ from pinned commits.
+
+    Submodules that are not checked out yet are skipped; materializing them
+    is the responsibility of the submodule ensure steps. Anything present
+    must match moose_deps.txt exactly so dependency drift surfaces here
+    instead of as confusing downstream build failures.
+    """
+    deps = get_pinned_moose_deps(repo_dir)
+    if not deps:
+        return
+    for name, rel_path in _MOOSE_DEP_SUBMODULES.items():
+        expected = deps.get(name)
+        if not expected:
+            continue
+        sub_dir = moose_dir / rel_path
+        if not (sub_dir / ".git").exists():
+            continue
+        res = subprocess.run(
+            ["git", "-C", str(sub_dir), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode != 0:
+            raise RuntimeError(
+                f"Cannot determine checked-out commit of MOOSE "
+                f"dependency '{name}' in {sub_dir}."
+            )
+        actual = res.stdout.strip()
+        if actual != expected:
+            raise RuntimeError(
+                f"MOOSE dependency '{name}' is at {actual} but "
+                f"moose_deps.txt pins {expected}. Update the pin files "
+                f"or re-materialize submodules at the pinned commits."
+            )
 
 
 def ensure_moose_repo(repo_dir: Path, moose_dir: Path) -> None:
