@@ -19,7 +19,7 @@ jobs:
   build-linux:
     name: "Linux: Build and Verify Wheel"
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 120
 
     steps:
       - name: "Linux: Checkout repository"
@@ -124,7 +124,7 @@ jobs:
   build-windows:
     name: "Windows: Build and Verify Wheel"
     runs-on: windows-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
 
     steps:
       - name: "Windows: Configure git long paths"
