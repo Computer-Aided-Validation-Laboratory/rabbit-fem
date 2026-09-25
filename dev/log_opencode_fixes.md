@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: isolated-run copy used nested lib/ layout (test bug)
+
+- **CI run**: macOS `36182628495` (failed at 18m in `Run test suite`, `9 passed, 1 failed`) — steps 1 (linked paths) and 2 (RPATHs) green; step 3 isolated `--version` died SIGABRT: `dyld: Library not loaded: @rpath/librabbit_test-opt.0.dylib`.
+- **Root cause**: test-harness layout bug, not product. Staging lays out `bin/rabbit` + `lib/` as siblings with binary RPATH `@loader_path/../lib`. The darwin test copied the binary to `<iso>/rabbit` and libs to `<iso>/lib/` (nested), so `@rpath` resolved to `<iso>/../lib` — outside the copy. The staged tree and wheel were consistent all along (all 9 sim tests run the staged binary in place).
+- **Fix**: darwin step 3 now mirrors the staged sibling layout (`<iso>/bin/rabbit` + `<iso>/lib/`). No product change; the relocation invariant under test is unchanged, only the harness copy is faithful.
+- **Platform considerations**: test-only, darwin branch; win32/Linux branches untouched.
+- **Files changed**: `test/test_simulations.py` (darwin step-3 layout only).
+- **Verification**: unit suite 25 passed; `py_compile`; layout correctness by construction (`@loader_path=ISO/bin` → `../lib=ISO/lib`). Full proof is the next mac round (step 3 runs the whole staged closure relocated).
+- **Remaining uncertainty**: whether further `@rpath` deps beyond the test lib surface once loading proceeds past it — step 3 will report each by name.
+
 ## 2026-09-25 — macOS: absolute Homebrew RPATHs shipped in staged tree (step 2)
 
 - **CI run**: macOS `36180376611` (failed at 18m in `Run test suite`, `9 passed, 1 failed`) — the `@rpath` relink held (linked-path step 1 green). Step 2 failed: `Non-relocatable RPATH '/opt/homebrew/opt/hdf5-mpi/lib' in rabbit`.

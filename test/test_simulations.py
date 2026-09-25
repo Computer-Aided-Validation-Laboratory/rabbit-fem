@@ -318,12 +318,15 @@ def test_binary_and_library_relocatability(tmp_path: Path) -> None:
 
         # 3. Relocated execution: copy binary and bundled libs to an
         # isolated directory, strip build environment variables, and run
-        # a real solve there
+        # a real solve there. Mirror the staged bin/ + lib/ sibling
+        # layout: the binary's RPATH is @loader_path/../lib, so a
+        # nested lib/ dir would resolve @rpath outside the copy.
         isolated_dir = tmp_path / "rabbit_isolated"
+        isolated_bin_dir = isolated_dir / "bin"
         isolated_lib = isolated_dir / "lib"
-        isolated_dir.mkdir(parents=True, exist_ok=True)
+        isolated_bin_dir.mkdir(parents=True, exist_ok=True)
         isolated_lib.mkdir(parents=True, exist_ok=True)
-        isolated_bin = isolated_dir / "rabbit"
+        isolated_bin = isolated_bin_dir / "rabbit"
         shutil.copy2(rabbit_bin, isolated_bin)
         if lib_dir.is_dir():
             for staged_lib in lib_dir.glob("*.dylib*"):
