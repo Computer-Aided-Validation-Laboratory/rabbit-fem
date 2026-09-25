@@ -61,8 +61,13 @@ foreach ($tool in $requiredMsysTools) {
 if ($needsInstall) {
     Write-Host "[*] Synchronizing MSYS2 database and installing required packages..." -ForegroundColor Yellow
     & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/python-pip msys/cmake
-    & (Join-Path $MsysRoot "usr\bin\python3.exe") -m pip install --break-system-packages --quiet packaging pyyaml
 }
+# MSYS python modules required by MOOSE/PETSc configure scripts (premake.py,
+# versioner.py, PETSc configure). These must be ensured on every run: a cached
+# MSYS2 image provides the tools above but not necessarily the pip modules,
+# and `make` invokes /usr/bin/python3 rather than the .venv interpreter.
+Write-Host "[*] Ensuring MSYS python modules (packaging, pyyaml, jinja2)..." -ForegroundColor Yellow
+& (Join-Path $MsysRoot "usr\bin\python3.exe") -m pip install --break-system-packages --quiet packaging pyyaml jinja2
 foreach ($tool in $requiredMsysTools) {
     if (-not (Test-Path (Join-Path $MsysRoot "usr\bin\$tool"))) {
         throw "Failed to install required MSYS2 tool $tool in $MsysRoot\usr\bin."
@@ -230,6 +235,30 @@ if ($subsNeeded.Count -gt 0) {
         }
     }
 }
+
+# 5.6. Ensure Windows source patches (unconditional).
+# CI restores built libs via actions/cache and then invokes `-Stage rabbit`
+# directly, skipping the petsc/libmesh/wasp/moose stages where patches were
+# historically applied. A fresh checkout therefore builds Rabbit against
+# unpatched upstream sources (e.g. unpatched moose.mk rebuilds
+# _pycapabilities.so with MSYS python headers -> sys/select.h failure).
+# Apply all patches here on every invocation so any Stage sees patched
+# sources. `patch -N` returns 1 when hunks are already applied; only exit
+# codes >1 indicate a real failure (no `|| true` error hiding).
+$patchSteps = @(
+    @{ Dir = "moose/petsc"; File = "$RepoRootPosix/patches/windows/petsc.patch"; Title = "Ensuring PETSc Windows patch" },
+    @{ Dir = "moose/libmesh/contrib/netcdf/netcdf-c-4.6.2"; File = "$RepoRootPosix/patches/windows/netcdf.patch"; Title = "Ensuring NetCDF Windows patch" },
+    @{ Dir = "moose/libmesh/contrib/metis/GKlib"; File = "$RepoRootPosix/patches/windows/metis.patch"; Title = "Ensuring METIS Windows patch" },
+    @{ Dir = "moose/framework/contrib/wasp"; File = "$RepoRootPosix/patches/windows/wasp.patch"; Title = "Ensuring WASP Windows patch" },
+    @{ Dir = "moose"; File = "$RepoRootPosix/patches/windows/moose.patch"; Title = "Ensuring MOOSE Windows patch" }
+)
+foreach ($p in $patchSteps) {
+    $patchCmd = "if [ -f `"$($p.File)`" ] && [ -d `"$($p.Dir)`" ]; then cd `"$($p.Dir)`" && set +e; patch -p1 -N -r - < `"$($p.File)`"; code=`$?; set -e; if [ `$code -gt 1 ]; then exit `$code; fi; else echo `"Skipping $($p.Title): source or patch not present yet`"; fi"
+    Invoke-MsysBash $patchCmd $p.Title
+}
+# Fail early if the pycapabilities stub is missing after patching.
+$stubCheck = "if [ -f moose/framework/moose.mk ]; then if ! grep -q 'Skipping pycapabilities on Windows' moose/framework/moose.mk; then echo 'ERROR: MOOSE Windows patch not applied (pycapabilities stub missing in moose/framework/moose.mk)'; exit 1; fi; fi"
+Invoke-MsysBash $stubCheck "Verifying MOOSE Windows patch"
 
 # 6. Build PETSc
 if ($Stage -in @("all", "petsc")) {
