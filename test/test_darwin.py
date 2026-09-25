@@ -19,6 +19,7 @@ libMesh configure option.
 """
 
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -27,6 +28,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import build.darwin as darwin
+
+REPO_ROOT = Path(darwin.__file__).resolve().parent.parent.parent
+REAL_PATCH = REPO_ROOT / "patches" / "macos" / "poly2tri.patch"
 
 
 def _run_build_libmesh(
@@ -81,3 +85,58 @@ def test_libmesh_skipped_when_already_built(
 
     commands2 = _run_build_libmesh(tmp_path, monkeypatch)
     assert commands2 == []
+
+
+@pytest.mark.skipif(
+    shutil.which("patch") is None, reason="patch utility not available"
+)
+def test_poly2tri_patch_applies_to_pristine_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The macOS poly2tri patch must apply to the real pinned sources.
+
+    Uses a scratch copy of the repository's own shapes.h so the local
+    checkout (possibly mid-build) is never modified.
+    """
+    assert REAL_PATCH.is_file()
+    content = REAL_PATCH.read_text(encoding="utf-8")
+    assert "poly2tri/poly2tri/common/shapes.h" in content
+    assert "#include <ostream>" in content
+
+    repo_dir = tmp_path / "repo"
+    target = (
+        tmp_path
+        / "moose"
+        / "libmesh"
+        / "contrib"
+        / "poly2tri"
+        / "poly2tri"
+        / "poly2tri"
+        / "common"
+    )
+    target.mkdir(parents=True)
+    shutil.copy(
+        REPO_ROOT
+        / "moose"
+        / "libmesh"
+        / "contrib"
+        / "poly2tri"
+        / "poly2tri"
+        / "poly2tri"
+        / "common"
+        / "shapes.h",
+        target / "shapes.h",
+    )
+    (repo_dir / "patches" / "macos").mkdir(parents=True)
+    shutil.copy(REAL_PATCH, repo_dir / "patches" / "macos" / REAL_PATCH.name)
+
+    darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
+    patched = (target / "shapes.h").read_text(encoding="utf-8")
+    assert "#include <ostream>" in patched
+
+    # Second application must be a tolerated no-op (idempotent for
+    # cache-hit runs that re-invoke the build).
+    darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
+    assert (target / "shapes.h").read_text(
+        encoding="utf-8"
+    ) == patched

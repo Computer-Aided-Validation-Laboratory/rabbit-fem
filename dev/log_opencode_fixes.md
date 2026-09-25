@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: poly2tri missing `#include <ostream>` (follow-up in libMesh)
+
+- **CI run**: macOS `36137283766` (failed at 1h38m in `Build libMesh`) — notably, the `--disable-netgen` fix worked (no Netgen errors anywhere; the build progressed over an hour past the old failure point).
+- **New error, single TU**: `contrib/poly2tri/.../common/shapes.h:122: error: no type named 'ostream' in namespace 'std'` — the header declares `std::ostream& operator<<` but includes only `<cmath> <cstddef> <stdexcept> <vector>`. Older libc++ provided `ostream` transitively; LLVM 23 does not. Grep-verified this is the only header in all of poly2tri using iostream facilities, so one include fixes the whole package (no whack-a-mole). MOOSE framework itself includes poly2tri (`BoundaryLayerUtils`, `MeshTriangulationUtils`, ...), so the patch applies unconditionally in `build_libmesh`, not only when rebuilding.
+- **Fix**: new `patches/macos/poly2tri.patch` (+4-line comment + `#include <ostream>`), applied idempotently via new `apply_macos_patches()` in `scripts/build/darwin.py` (exit 0 applied / 1 already-applied tolerated, >1 raises with output — same contract as the Windows patch steps, without their old `|| true` masking).
+- **Files changed**: `patches/macos/poly2tri.patch` (new), `scripts/build/darwin.py`, `test/test_darwin.py` (real apply-to-scratch-copy + idempotence test).
+- **Verification**: `patch -p1 --dry-run` + real apply on a scratch copy of the pinned `shapes.h` (local tree untouched); `pytest` → 12 passed.
+- **Remaining uncertainty**: whether further macOS-only contrib TUs hide behind this one (same loop as before — next CI round tells).
+
 ## 2026-09-25 — Release: shared caches with build-and-test + 360 min timeouts
 
 - **Why the v2026.9.3 release rebuilt everything**: `release.yml` used its own cache namespace (`linux/windows-moose-build-*`, own wheel keys) that no prior run had ever populated — first tag = guaranteed cold full rebuild on both runners (~1h+), not a hang.

@@ -167,6 +167,32 @@ def build_petsc(
         print("[OK] PETSc already built.")
 
 
+def apply_macos_patches(moose_dir: Path, repo_dir: Path) -> None:
+    """Apply macOS portability patches to third-party sources.
+
+    Idempotent: already-applied patches are skipped, genuine failures
+    raise. Runs unconditionally (not only when rebuilding) because
+    framework sources include these headers on every compile.
+    """
+    patches = {
+        "poly2tri.patch": moose_dir / "libmesh" / "contrib" / "poly2tri",
+    }
+    for patch_name, work_dir in patches.items():
+        patch_file = repo_dir / "patches" / "macos" / patch_name
+        if not patch_file.is_file() or not work_dir.is_dir():
+            continue
+        res = subprocess.run(
+            ["patch", "-p1", "-N", "-r", "-", "-i", str(patch_file)],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode > 1:
+            raise RuntimeError(
+                f"Applying {patch_name} failed:\n{res.stdout}\n{res.stderr}"
+            )
+
+
 def build_libmesh(
     repo_dir: Path,
     moose_dir: Path,
@@ -176,6 +202,7 @@ def build_libmesh(
     """Build libMesh dependency on macOS."""
     ensure_moose_repo(repo_dir, moose_dir)
     ensure_moose_submodules(moose_dir)
+    apply_macos_patches(moose_dir, repo_dir)
     libmesh_lib = (
         moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.dylib"
     )
