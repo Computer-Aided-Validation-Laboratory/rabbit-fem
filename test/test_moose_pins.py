@@ -101,3 +101,20 @@ def test_verify_skips_absent_submodules(tmp_path: Path) -> None:
         "petsc abc123\nlibmesh def456\nwasp ghi789\n", encoding="utf-8"
     )
     verify_moose_deps(moose_dir, tmp_path)
+
+
+def test_verify_warns_on_unverifiable_checkout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Cache-restored trees with dangling git metadata must not fail."""
+    moose_dir = tmp_path / "moose"
+    petsc_dir = moose_dir / "petsc"
+    petsc_dir.mkdir(parents=True)
+    (petsc_dir / ".git").write_text(
+        "gitdir: /nonexistent/modules/petsc\n", encoding="utf-8"
+    )
+    (tmp_path / "moose_deps.txt").write_text(
+        "petsc abc123\n", encoding="utf-8"
+    )
+    verify_moose_deps(moose_dir, tmp_path)
+    assert "cannot verify" in capsys.readouterr().out

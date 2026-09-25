@@ -1,5 +1,12 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — FIX-OWN-REGRESSION: verifier raised on dangling gitlinks
+
+- **What happened**: the `verify_moose_deps` shipped in the re-pin commit raised `RuntimeError: Cannot determine checked-out commit` whenever `git rev-parse` failed — including the *expected* cache-hit case, where `actions/cache` restores submodule content without its git dir (dangling `.git` gitlink). This red-blocked every Linux run on the re-pin commit within ~1 min (e.g. `36117932030`), and would have done the same on Windows via the ps1 hook.
+- **Why the initial design was wrong**: I conflated "cannot verify" with "drifted". Cache-restored trees are a legitimate, by-design state; only a *successful* rev-parse that disagrees with the lock is drift.
+- **Fix**: the rev-parse-failure branch now prints a `WARNING ... skipping pin check` and continues; mismatch still raises. Absent checkouts still skip. Added `test_verify_warns_on_unverifiable_checkout` (dangling gitlink fixture) — 9 tests pass.
+- **Lesson applied**: the pre-existing green Linux run (`36115045320`, 26 min, includes the libomp fix) confirms the staging fix independently of this episode.
+
 ## 2026-09-25 — Windows: submodule init gated on libs, leaving hollow source trees
 
 - **Root cause, fully evidenced**: `moose/` is gitignored, not a submodule, so `actions/checkout` materializes no MOOSE content; everything comes from repo code + caches. In cache-hit runs the dependency caches restore *built libs only* (`arch-windows-opt/`, `installed/`) while `moose/petsc|libmesh|.../wasp` source trees stay hollow — proven by preflight forensics (`git rev-parse` in `moose/petsc` walks up to the MOOSE SHA; `include/` absent) and by §5.6 logs (`can't find file to patch`, `Skipping ... source not present yet`, tolerated as `[OK]`). But ps1 §5.5 only initialized submodules when *libs* were missing *and* the matching stage ran, so `-Stage rabbit` never backfilled sources and the framework compile died on the missing `petscsys.h`. Full-rebuild runs passed because missing libs + missing sentinels triggered the init path.

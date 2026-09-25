@@ -73,9 +73,11 @@ def verify_moose_deps(moose_dir: Path, repo_dir: Path) -> None:
     """Fail early if materialized submodules differ from pinned commits.
 
     Submodules that are not checked out yet are skipped; materializing them
-    is the responsibility of the submodule ensure steps. Anything present
-    must match moose_deps.txt exactly so dependency drift surfaces here
-    instead of as confusing downstream build failures.
+    is the responsibility of the submodule ensure steps. Submodules whose
+    git metadata is unavailable (e.g. cache-restored trees with dangling
+    gitlinks) cannot be verified and only produce a warning. Anything
+    verifiable must match moose_deps.txt exactly so dependency drift
+    surfaces here instead of as confusing downstream build failures.
     """
     deps = get_pinned_moose_deps(repo_dir)
     if not deps:
@@ -93,10 +95,12 @@ def verify_moose_deps(moose_dir: Path, repo_dir: Path) -> None:
             text=True,
         )
         if res.returncode != 0:
-            raise RuntimeError(
-                f"Cannot determine checked-out commit of MOOSE "
-                f"dependency '{name}' in {sub_dir}."
+            print(
+                f"WARNING: cannot verify checked-out commit of MOOSE "
+                f"dependency '{name}' in {sub_dir} "
+                f"(git metadata unavailable); skipping pin check."
             )
+            continue
         actual = res.stdout.strip()
         if actual != expected:
             raise RuntimeError(
