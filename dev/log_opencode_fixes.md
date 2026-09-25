@@ -1,5 +1,9 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — Green matrix on bfc941d (all three OS)
+
+- **Runs**: macOS `36184794144` (16m), Linux `36184794342` (22m), Windows `36184794498` (41m) — all `success` on commit `bfc941d`, including `Run test suite` on each OS. The four fixes above (ensure-before-patch, `@rpath` relink, RPATH strip, isolated-layout mirror) compose to a fully green matrix with warm caches.
+
 ## 2026-09-25 — macOS: isolated-run copy used nested lib/ layout (test bug)
 
 - **CI run**: macOS `36182628495` (failed at 18m in `Run test suite`, `9 passed, 1 failed`) — steps 1 (linked paths) and 2 (RPATHs) green; step 3 isolated `--version` died SIGABRT: `dyld: Library not loaded: @rpath/librabbit_test-opt.0.dylib`.
