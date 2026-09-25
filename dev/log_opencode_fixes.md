@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: staged binary kept absolute LC_LOAD_DYLIB (real relocatability bug)
+
+- **CI run**: macOS `36178001268` (failed at 19m in `Run test suite`, `9 passed, 1 failed`) — the ensure-before-patch fix held (framework compiled, 40 libs staged, 45 MB wheel built, all sim tests green). The new `darwin` otool branch failed loudly as designed: `Forbidden hardcoded path '/Users/runner/.../test/lib/librabbit_test-opt.0.dylib' linked by rabbit binary`.
+- **Root cause**: genuine product defect, not test overreach (verified, not assumed). The macOS linker records absolute build-tree paths in LC_ID/LC_LOAD_DYLIB, while ELF records SONAMEs resolved via RPATH — so Linux needs only `$ORIGIN` RPATHs but macOS staging must also rewrite load commands. `stage_artifacts` copied the libs and added `@loader_path` RPATHs (with `check=False`, hiding the duplicate-RPATH errors also visible in the log) but never ran `install_name_tool -change/-id`. Proven same-artifact-class on Linux: local `rabbit-opt` also links `librabbit_test-opt.so.0`, yet Linux CI is green because SONAME+RPATH resolves. The staged mac binary therefore ran only where the absolute path exists (the build machine) — the passing sim tests proved nothing about relocation.
+- **Fix**: new `relink_darwin_staged_artifacts()` in `scripts/build/darwin.py`, called from the existing darwin block in `stage_artifacts`: set every staged dylib's ID to `@rpath/<basename>`, rewrite every staged reference (binary + libs) whose basename matches a staged lib to `@rpath/<basename>`. System (`/usr/lib`, `/System`) and non-staged shared deps (e.g. Homebrew MPI) untouched — same bar as Linux. All invocations `check=True` so half-relinked trees fail loudly instead of shipping dyld time-bombs. No test change needed (the assertion was correct).
+- **Platform considerations**: darwin-only code path; Linux/Windows staging byte-identical (block-gated, lazy import).
+- **Files changed**: `scripts/build/darwin.py` (new helper), `scripts/build/common.py` (6-line call in darwin block), `test/test_darwin.py` (1 new test with mocked otool/install_name_tool: absolute staged refs rewritten, `@rpath`/`/usr/lib`/non-staged refs untouched, `-id` set).
+- **Verification**: 25 unit tests pass via repo `.venv`; `py_compile` + `git diff --check` clean. Full proof is the next mac round (steps 1–3 of the darwin relocatability test).
+- **Remaining uncertainty**: whether staged libs carry additional absolute LC_RPATHs that step 2 (`@loader_path`-only assertion) will flag — deliberately left for the next round to decide empirically rather than deleting RPATHs on speculation (could break `@rpath` refs to non-staged libs).
+
 ## 2026-09-25 — macOS: Rabbit step patched before framework sources existed (ordering)
 
 - **CI run**: macOS `36176068156` (failed at 11m in `Build Rabbit`, `tinyhttp/http.h: no member named 'transform' / no template named 'function'`) — all dep stages cache-hit and skipped. Same lean-header symptom as the earlier tinyhttp round, but the patch existed this time.

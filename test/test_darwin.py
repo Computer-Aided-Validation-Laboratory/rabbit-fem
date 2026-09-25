@@ -467,3 +467,81 @@ def test_prepare_ensures_sources_before_patching(
     ).read_text(encoding="utf-8")
     assert "#include <algorithm>" in patched
     assert "#include <functional>" in patched
+
+
+def test_relink_rewrites_staged_refs_to_rpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Staged Mach-O artifacts must reference staged libs via @rpath.
+
+    Regression guard for the CI failure where the staged macOS binary
+    kept an absolute LC_LOAD_DYLIB to
+    test/lib/librabbit_test-opt.0.dylib: adding RPATHs is not enough
+    because the macOS linker records absolute build paths (unlike ELF
+    SONAMEs), so the shipped tree only ran on the build machine.
+    """
+    lib_dir = tmp_path / "lib"
+    lib_dir.mkdir()
+    (lib_dir / "librabbit_test-opt.0.dylib").write_bytes(b"fake-a")
+    (lib_dir / "libmesh_opt.dylib").write_bytes(b"fake-b")
+    staged_bin = tmp_path / "rabbit"
+    staged_bin.write_bytes(b"fake-bin")
+
+    otool_outputs = {
+        "rabbit": (
+            "rabbit:\n"
+            "\t/Users/runner/work/rabbit-fem/test/lib/librabbit_test-opt.0.dylib (compat 0.0.0)\n"
+            "\t@rpath/libmesh_opt.dylib (compat 0.0.0)\n"
+            "\t/usr/lib/libSystem.B.dylib (compat 1.0.0)\n"
+            "\t/opt/homebrew/opt/open-mpi/lib/libmpi.40.dylib (compat 0.0.0)\n"
+        ),
+        "librabbit_test-opt.0.dylib": (
+            "librabbit_test-opt.0.dylib:\n"
+            "\t/Users/runner/work/rabbit-fem/moose/libmesh/installed/lib/libmesh_opt.dylib (compat 0.0.0)\n"
+            "\t/usr/lib/libc++.1.dylib (compat 1.0.0)\n"
+        ),
+        "libmesh_opt.dylib": (
+            "libmesh_opt.dylib:\n"
+            "\t/usr/lib/libSystem.B.dylib (compat 1.0.0)\n"
+        ),
+    }
+    calls: list[list[str]] = []
+
+    def fake_run(
+        cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        assert kwargs.get("check") is True
+        if cmd[0] == "otool":
+            name = Path(cmd[-1]).name
+            return subprocess.CompletedProcess(cmd, 0, otool_outputs[name])
+        assert cmd[0] == "install_name_tool"
+        return subprocess.CompletedProcess(cmd, 0, "")
+
+    monkeypatch.setattr(darwin.subprocess, "run", fake_run)
+
+    darwin.relink_darwin_staged_artifacts(staged_bin, lib_dir)
+
+    id_calls = [c for c in calls if "-id" in c]
+    assert sorted(c[2] for c in id_calls) == [
+        "@rpath/libmesh_opt.dylib",
+        "@rpath/librabbit_test-opt.0.dylib",
+    ]
+
+    change_calls = [c for c in calls if "-change" in c]
+    # (old, new, target) triples actually rewritten.
+    rewritten = [(c[2], c[3], Path(c[4]).name) for c in change_calls]
+    assert (
+        "/Users/runner/work/rabbit-fem/test/lib/librabbit_test-opt.0.dylib",
+        "@rpath/librabbit_test-opt.0.dylib",
+        "rabbit",
+    ) in rewritten
+    assert (
+        "/Users/runner/work/rabbit-fem/moose/libmesh/installed/lib/libmesh_opt.dylib",
+        "@rpath/libmesh_opt.dylib",
+        "librabbit_test-opt.0.dylib",
+    ) in rewritten
+    # Already-relocatable (@rpath), system (/usr/lib), and non-staged
+    # shared (/opt/homebrew MPI) references must be left untouched.
+    for old, _new, _target in rewritten:
+        assert old.startswith("/Users/runner")

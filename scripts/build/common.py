@@ -573,6 +573,13 @@ def stage_artifacts(
             if f.is_file():
                 subprocess.run(["strip", "-x", str(f)], check=False)
 
+        # The linker records absolute build paths in Mach-O load
+        # commands; rewrite staged IDs/references to @rpath form so the
+        # shipped tree resolves via its @loader_path RPATHs instead.
+        from .darwin import relink_darwin_staged_artifacts
+
+        relink_darwin_staged_artifacts(dest_bin, lib_target_dir)
+
         subprocess.run(
             [
                 "install_name_tool",

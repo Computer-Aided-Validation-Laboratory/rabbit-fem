@@ -222,6 +222,65 @@ def prepare_darwin_rabbit_sources(
     apply_macos_patches(moose_dir, repo_dir)
 
 
+def relink_darwin_staged_artifacts(bin_path: Path, lib_dir: Path) -> None:
+    """Rewrite staged Mach-O IDs and load commands to @rpath form.
+
+    The macOS linker records absolute build-tree paths in LC_ID and
+    LC_LOAD_DYLIB (unlike ELF, which records SONAMEs resolved via
+    RPATH). Merely copying the libraries and adding @loader_path
+    RPATHs leaves those absolute references intact, so the staged
+    binary only runs on the build machine. Point every staged
+    library's ID at @rpath/<basename> and rewrite every staged
+    reference to a staged library the same way; the @loader_path
+    RPATHs added during staging then resolve the whole closure
+    relocatably. System libraries (/usr/lib, /System) and
+    non-staged shared dependencies (e.g. Homebrew MPI) are left
+    untouched. Failures raise (check=True): a half-relinked tree
+    would only surface later as dyld errors on user machines.
+    """
+    staged: dict[str, Path] = {}
+    if lib_dir.is_dir():
+        for candidate in sorted(lib_dir.glob("*.dylib*")):
+            if candidate.is_file() and not candidate.is_symlink():
+                staged[candidate.name] = candidate
+    for staged_lib in staged.values():
+        subprocess.run(
+            [
+                "install_name_tool",
+                "-id",
+                f"@rpath/{staged_lib.name}",
+                str(staged_lib),
+            ],
+            check=True,
+        )
+    for macho_path in [bin_path, *staged.values()]:
+        res = subprocess.run(
+            ["otool", "-L", str(macho_path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        for line in res.stdout.splitlines()[1:]:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            dep = stripped.split()[0]
+            if dep.startswith(("@", "/usr/lib/", "/System/Library/")):
+                continue
+            basename = Path(dep).name
+            if basename in staged:
+                subprocess.run(
+                    [
+                        "install_name_tool",
+                        "-change",
+                        dep,
+                        f"@rpath/{basename}",
+                        str(macho_path),
+                    ],
+                    check=True,
+                )
+
+
 def build_libmesh(
     repo_dir: Path,
     moose_dir: Path,
