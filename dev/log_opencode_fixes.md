@@ -1,5 +1,17 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — Windows: Rabbit-stage read-only preflight for dependency flags (diagnosing `petscsys.h`)
+
+- **CI run prompting this**: Windows `36111456611` (failure, 10m27s) — framework unity compile fails with `fatal error: 'petscsys.h' file not found` despite all dependency stages cache-restored and both prior fixes verifiably active in the same log.
+- **Why the three failures look identical**: the ps1 failure handler appends the (stale, cache-restored, dated 05:06:12) PETSc `configure.log` tail to every failure log, and the PR comment posts only tail-100. The real error is always above the `--- PETSC CONFIGURE.LOG TAIL ---` marker. Runs `36109996543`/`36110525729` = HIT link (`std::__1`, MinGW vs libc++); `36111456611` = `petscsys.h`.
+- **What static analysis established** (no fix pushed on this basis):
+  - `petscsys.h` is a checkout-provided source header (`moose/petsc/include/`), so the file exists in every workspace — purely an include-flag resolution failure.
+  - Converter `posix_to_win` executed locally on the exact baked flag forms (`-I/d/a/...`, `-include`, `-L`, `-Wl,-rpath,`, already-Windows inputs) — all convert correctly and idempotently; wrapper pass-through drops nothing.
+  - `libmesh-config` emits fully baked absolute paths (verified against local `installed/bin/libmesh-config` structure); cache sizes stable across saves (no partial saves).
+  - Not yet verifiable from logs alone whether the restored `installed/bin/libmesh-config --include` output lacks PETSc entries (stale libmesh configured without PETSc is the prime suspect, matching the historical `--with-petsc` vs `PETSC_DIR/PETSC_ARCH` incident in `dev/log_windows_fixes_local.md`).
+- **Change (diagnostic + permanent fail-early guard, Windows-only)**: new read-only preflight in `scripts/install_dependencies_windows.ps1` §10 before `make` — prints `libmesh-config --cxx/--cppflags/--include`, asserts `--include` mentions `petsc` (clear error otherwise), and asserts `arch-windows-opt/include/petscconf.h` + `petsc/include/petscsys.h` exist. Verified locally by emulating the PowerShell→bash expansion and running happy / no-PETSc / missing-script scenarios (exits 0/1/1 with the intended messages; `bash -n` clean).
+- **How to verify**: next Windows run's `Verifying dependency include flags for Rabbit` step shows the exact flags; if the stale-libmesh theory holds it fails there with the PETSc message instead of deep in unity compilation.
+
 ## 2026-09-25 — Windows: Rabbit-stage HIT rebuild links MinGW g++ against Zig libc++ WASP libs
 
 - **CI run**: Windows `36109996543` (failure, 8m33s) on commit `806b786` — full rebuild (all dependency stages ran and passed, including new `Ensuring * Windows patch` + `Verifying MOOSE Windows patch` steps and `Skipping pycapabilities on Windows...`).
