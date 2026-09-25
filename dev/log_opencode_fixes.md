@@ -1,5 +1,13 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — Windows: submodule init gated on libs, leaving hollow source trees
+
+- **Root cause, fully evidenced**: `moose/` is gitignored, not a submodule, so `actions/checkout` materializes no MOOSE content; everything comes from repo code + caches. In cache-hit runs the dependency caches restore *built libs only* (`arch-windows-opt/`, `installed/`) while `moose/petsc|libmesh|.../wasp` source trees stay hollow — proven by preflight forensics (`git rev-parse` in `moose/petsc` walks up to the MOOSE SHA; `include/` absent) and by §5.6 logs (`can't find file to patch`, `Skipping ... source not present yet`, tolerated as `[OK]`). But ps1 §5.5 only initialized submodules when *libs* were missing *and* the matching stage ran, so `-Stage rabbit` never backfilled sources and the framework compile died on the missing `petscsys.h`. Full-rebuild runs passed because missing libs + missing sentinels triggered the init path.
+- **Fix (Windows-only, mirrors Linux `ensure_moose_submodules` which already gates on source sentinels)**: submodule init now fires on missing *sentinel source files* (`petsc/configure`, `libmesh/configure`, `wasp/CMakeLists.txt`) regardless of Stage; afterwards a hard verification throws with the exact missing paths instead of limping on. Complete trees behave exactly as before (all sentinels present → no-op).
+- **Files changed**: `scripts/install_dependencies_windows.ps1` (§5.5 only).
+- **Verification**: static trace-through of hollow vs complete vs fresh trees (no pwsh available locally to execute); next cache-hit Windows round is the live test — expect `Initializing MOOSE submodules: petsc libmesh framework/contrib/wasp` followed by real patch application (`patching file ...`) instead of `can't find file` skips.
+- **Remaining uncertainty**: why `actions/checkout`'s own `submodule update --init --force --recursive` completes in <1s without materializing anything (no `moose` entry in rabbit-fem — nothing to init — so this is expected behavior, not a GitHub bug; the repo-owned ensure path above is the correct fix location).
+
 ## 2026-09-25 — Re-pin MOOSE to master tip + explicit dep lock file
 
 - **Request**: stop tracking the MOOSE default (`next`) line; target `master` at a fixed commit, plus pin all build deps explicitly so a future upstream merge cannot silently move us.

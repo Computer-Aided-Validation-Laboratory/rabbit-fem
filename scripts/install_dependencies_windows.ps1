@@ -210,10 +210,19 @@ $needPetsc = ($Stage -in @("all", "petsc")) -and -not (Test-Path $PetscLib) -and
 $needLibmesh = ($Stage -in @("all", "libmesh")) -and -not (Test-Path $LibMeshLib) -and -not (Test-Path (Join-Path $MooseDir "libmesh\installed\include\libmesh\libmesh.h"))
 $needWasp = ($Stage -in @("all", "wasp")) -and -not (Test-Path $HitExe) -and -not (Test-Path (Join-Path $MooseDir "framework\contrib\wasp\CMakeLists.txt"))
 
+# Submodule SOURCES must exist regardless of Stage. Cache-hit runs restore
+# built libs without source trees, so gating init on missing libs (above)
+# leaves hollow trees that fail confusingly downstream (e.g. missing
+# moose/petsc/include/petscsys.h). Gate on sentinel source files instead,
+# mirroring ensure_moose_submodules on Linux.
+$needPetscSources = -not (Test-Path $MoosePetscCfg)
+$needLibmeshSources = -not (Test-Path $MooseLibmeshCfg)
+$needWaspSources = -not (Test-Path (Join-Path $MooseDir "framework\contrib\wasp\CMakeLists.txt"))
+
 $subsNeeded = @()
-if ($needPetsc) { $subsNeeded += "petsc" }
-if ($needLibmesh) { $subsNeeded += "libmesh" }
-if ($needWasp) { $subsNeeded += "framework/contrib/wasp" }
+if ($needPetsc -or $needPetscSources) { $subsNeeded += "petsc" }
+if ($needLibmesh -or $needLibmeshSources) { $subsNeeded += "libmesh" }
+if ($needWasp -or $needWaspSources) { $subsNeeded += "framework/contrib/wasp" }
 
 if ($subsNeeded.Count -gt 0) {
     $subsList = $subsNeeded -join " "
@@ -234,6 +243,15 @@ if ($subsNeeded.Count -gt 0) {
             $attempt++
         }
     }
+}
+
+# Fail early if submodule sources are still missing (e.g. offline runners).
+$missingSources = @()
+if (-not (Test-Path $MoosePetscCfg)) { $missingSources += "moose/petsc/configure" }
+if (-not (Test-Path $MooseLibmeshCfg)) { $missingSources += "moose/libmesh/configure" }
+if (-not (Test-Path (Join-Path $MooseDir "framework\contrib\wasp\CMakeLists.txt"))) { $missingSources += "moose/framework/contrib/wasp/CMakeLists.txt" }
+if ($missingSources.Count -gt 0) {
+    throw "MOOSE submodule sources missing: $($missingSources -join ', '). Ensure network access so 'git submodule update --init --recursive' can materialize them."
 }
 
 # Fail early if materialized submodules drift from moose_deps.txt.
