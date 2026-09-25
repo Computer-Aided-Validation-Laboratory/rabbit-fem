@@ -314,8 +314,7 @@ if ($Stage -in @("all", "wasp")) {
 
 # 9. Configure MOOSE
 if ($Stage -in @("all", "moose")) {
-    $MooseConfig = Join-Path $RepoRoot "moose\framework\include\base\MooseConfig.h"
-    Invoke-MsysBash "$RepoRootPosix/scripts/fix_symlinks.sh $RepoRootPosix/moose" "Resolving MOOSE Windows symlinks"
+    & $PythonExe "$RepoRoot\scripts\fix_symlinks.py" "$RepoRoot\moose"
     $applyMoose = "cd moose && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/moose.patch`" || true"
     Invoke-MsysBash $applyMoose "Applying MOOSE Windows patch"
 
