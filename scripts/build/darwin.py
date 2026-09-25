@@ -177,6 +177,7 @@ def apply_macos_patches(moose_dir: Path, repo_dir: Path) -> None:
     patches = {
         "poly2tri.patch": moose_dir / "libmesh" / "contrib" / "poly2tri",
         "libmesh.patch": moose_dir / "libmesh",
+        "wasp.patch": moose_dir / "framework" / "contrib" / "wasp",
     }
     for patch_name, work_dir in patches.items():
         patch_file = repo_dir / "patches" / "macos" / patch_name
@@ -244,6 +245,7 @@ def build_wasp(
     """Build WASP and HIT parser on macOS."""
     ensure_moose_repo(repo_dir, moose_dir)
     ensure_moose_submodules(moose_dir)
+    apply_macos_patches(moose_dir, repo_dir)
     wasp_install = moose_dir / "framework" / "contrib" / "wasp" / "install"
     if not (wasp_install / "lib").is_dir():
         print("--> Building WASP parser...")

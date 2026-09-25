@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: WASP `Format.h` missing `#include <type_traits>`
+
+- **CI run**: macOS `36153829049` (failed at 1h7m in `Build WASP and HIT`, TU `waspexpr/ExprContext.cpp`) — libMesh incl. both prior patches built clean; failure moved into WASP.
+- **Error**: `waspcore/Format.h:216: error: no member named 'is_fundamental' in namespace 'std'` — the header uses `std::is_fundamental<T>::value` but includes only `<cmath> <string> <cstring> <sstream> <iostream> <iomanip> <stdio.h>`. Same lean-libc++ class.
+- **Fix**: `patches/macos/wasp.patch` (+ comment + `#include <type_traits>`, generated via `diff -u` after a hand-written hunk proved malformed), wired into the existing `apply_macos_patches()` table; that helper is now also called from `build_wasp` (WASP builds after libMesh, and CI invokes the stages separately).
+- **Files changed**: `patches/macos/wasp.patch` (new), `scripts/build/darwin.py`, `test/test_darwin.py` (apply + idempotence test).
+- **Verification**: dry-run + scratch-copy apply against pinned sources; `pytest` → 14 passed.
+- **Remaining uncertainty**: further lean-header TUs may surface in later rounds (same loop).
+
 ## 2026-09-25 — macOS: libMesh `dof_object.h` missing `#include <iterator>`
 
 - **CI run**: macOS `36148836952` (failed at 40m in `Build libMesh`, TU `dof_map.C`) — the poly2tri fix held (contrib built clean; failure moved into libMesh proper).

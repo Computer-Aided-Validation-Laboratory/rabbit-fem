@@ -32,6 +32,7 @@ import build.darwin as darwin
 REPO_ROOT = Path(darwin.__file__).resolve().parent.parent.parent
 REAL_PATCH = REPO_ROOT / "patches" / "macos" / "poly2tri.patch"
 REAL_LIBMESH_PATCH = REPO_ROOT / "patches" / "macos" / "libmesh.patch"
+REAL_WASP_PATCH = REPO_ROOT / "patches" / "macos" / "wasp.patch"
 
 
 def _run_build_libmesh(
@@ -178,3 +179,39 @@ def test_libmesh_patch_applies_to_pristine_tree(tmp_path: Path) -> None:
     assert (target / "dof_object.h").read_text(
         encoding="utf-8"
     ) == patched
+
+
+@pytest.mark.skipif(
+    shutil.which("patch") is None, reason="patch utility not available"
+)
+def test_wasp_patch_applies_to_pristine_tree(tmp_path: Path) -> None:
+    """The macOS WASP patch must apply to the real pinned sources."""
+    assert REAL_WASP_PATCH.is_file()
+    content = REAL_WASP_PATCH.read_text(encoding="utf-8")
+    assert "waspcore/Format.h" in content
+    assert "#include <type_traits>" in content
+
+    repo_dir = tmp_path / "repo"
+    target = tmp_path / "moose" / "framework" / "contrib" / "wasp" / "waspcore"
+    target.mkdir(parents=True)
+    shutil.copy(
+        REPO_ROOT
+        / "moose"
+        / "framework"
+        / "contrib"
+        / "wasp"
+        / "waspcore"
+        / "Format.h",
+        target / "Format.h",
+    )
+    (repo_dir / "patches" / "macos").mkdir(parents=True)
+    shutil.copy(
+        REAL_WASP_PATCH, repo_dir / "patches" / "macos" / REAL_WASP_PATCH.name
+    )
+
+    darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
+    patched = (target / "Format.h").read_text(encoding="utf-8")
+    assert "#include <type_traits>" in patched
+
+    darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
+    assert (target / "Format.h").read_text(encoding="utf-8") == patched

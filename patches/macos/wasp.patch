@@ -1,0 +1,12 @@
+--- a/waspcore/Format.h
++++ b/waspcore/Format.h
+@@ -9,6 +9,9 @@
+ #include <sstream>
+ #include <iostream>
+ #include <iomanip>
++// Required explicitly: this header uses std::is_fundamental, which newer
++// libc++ versions (e.g. Homebrew LLVM 23) no longer provide transitively.
++#include <type_traits>
+ #include <stdio.h>  // windows exponent configure
+ 
+ namespace wasp
