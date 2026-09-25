@@ -1,5 +1,38 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — All OS: broken `pyproject.toml` version string (fast fail)
+
+- **CI runs**: Linux `36109996335` (failure, 1m11s), macOS `36109996320` (failure, 1m35s), and prior round `36109533928/36109533935` fast failures, all on commit `806b786` (which inherited the breakage from `0d65386`).
+- **Step**: `Linux/macOS: Build Rabbit, stage artifacts, and build wheel` → `uv run python build_rabbit.py --wheel` exits 2 before any compilation.
+
+### Root cause
+
+- `pyproject.toml:17` read `version = "2026.9.3` (missing closing quote) — invalid TOML. `uv` fails during settings discovery: `TOML parse error at line 17, column 20 ... invalid basic string, expected '"'`.
+- Symptom vs cause: all three OS fail in ~1min at the same `uv run` step, which looks like infra flakiness but is a deterministic repo syntax error.
+- Why local passed: local work uses `make`/direct `.venv` python or `uv run --no-project`, bypassing project discovery; CI always uses `uv run` which parses `pyproject.toml`.
+
+### Why this fix addresses the root cause
+
+- One-character fix: `version = "2026.9.3"` restores valid TOML. No behaviour change, no platform branching — the same file is parsed on every OS.
+- Verified with stdlib `tomllib.load` (no new dependency): parses OK, `project.version == 2026.9.3`.
+
+### Platform-specific considerations
+
+- None — OS-independent. Fix cures Linux, Windows (`uv run python build_rabbit.py --wheel-only` parses too), and macOS identically.
+
+### Files changed
+
+- `pyproject.toml` (line 17: closing quote).
+
+### How to verify
+
+- `python3 -c "import tomllib; tomllib.load(open('pyproject.toml','rb'))"` → OK.
+- Next CI round: `uv run` steps proceed past settings discovery to actual builds on all OS.
+
+### Remaining uncertainty
+
+- None on this item. Known next item after unblocking: Linux `stage_artifacts` `libomp.so.5` unresolved (seen on `36106596972` before the TOML breakage masked it) — to be handled on the next watch tick.
+
 ## 2026-09-25 — Windows: patches skipped on cache-hit `-Stage rabbit` + MSYS `jinja2` missing
 
 - **CI runs**: Windows `36106596976` (failure, 4m35s), Linux `36106596972` (failure, 16m53s) on commit `af40a1e`, plus in-progress round `36109534xxx`.
