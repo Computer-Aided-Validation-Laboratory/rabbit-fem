@@ -176,6 +176,7 @@ def apply_macos_patches(moose_dir: Path, repo_dir: Path) -> None:
     """
     patches = {
         "poly2tri.patch": moose_dir / "libmesh" / "contrib" / "poly2tri",
+        "libmesh.patch": moose_dir / "libmesh",
     }
     for patch_name, work_dir in patches.items():
         patch_file = repo_dir / "patches" / "macos" / patch_name

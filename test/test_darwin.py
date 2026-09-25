@@ -31,6 +31,7 @@ import build.darwin as darwin
 
 REPO_ROOT = Path(darwin.__file__).resolve().parent.parent.parent
 REAL_PATCH = REPO_ROOT / "patches" / "macos" / "poly2tri.patch"
+REAL_LIBMESH_PATCH = REPO_ROOT / "patches" / "macos" / "libmesh.patch"
 
 
 def _run_build_libmesh(
@@ -138,5 +139,42 @@ def test_poly2tri_patch_applies_to_pristine_tree(
     # cache-hit runs that re-invoke the build).
     darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
     assert (target / "shapes.h").read_text(
+        encoding="utf-8"
+    ) == patched
+
+
+@pytest.mark.skipif(
+    shutil.which("patch") is None, reason="patch utility not available"
+)
+def test_libmesh_patch_applies_to_pristine_tree(tmp_path: Path) -> None:
+    """The macOS libMesh patch must apply to the real pinned sources."""
+    assert REAL_LIBMESH_PATCH.is_file()
+    content = REAL_LIBMESH_PATCH.read_text(encoding="utf-8")
+    assert "include/base/dof_object.h" in content
+    assert "#include <iterator>" in content
+
+    repo_dir = tmp_path / "repo"
+    target = tmp_path / "moose" / "libmesh" / "include" / "base"
+    target.mkdir(parents=True)
+    shutil.copy(
+        REPO_ROOT
+        / "moose"
+        / "libmesh"
+        / "include"
+        / "base"
+        / "dof_object.h",
+        target / "dof_object.h",
+    )
+    (repo_dir / "patches" / "macos").mkdir(parents=True)
+    shutil.copy(
+        REAL_LIBMESH_PATCH, repo_dir / "patches" / "macos" / REAL_LIBMESH_PATCH.name
+    )
+
+    darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
+    patched = (target / "dof_object.h").read_text(encoding="utf-8")
+    assert "#include <iterator>" in patched
+
+    darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
+    assert (target / "dof_object.h").read_text(
         encoding="utf-8"
     ) == patched

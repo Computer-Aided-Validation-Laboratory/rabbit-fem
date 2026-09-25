@@ -1,0 +1,13 @@
+--- a/include/base/dof_object.h
++++ b/include/base/dof_object.h
+@@ -31,6 +31,10 @@
+ // C++ includes
+ #include <cstddef>
+ #include <cstring>
++// Required explicitly: this header uses std::back_insert_iterator, which
++// newer libc++ versions (e.g. Homebrew LLVM 23) no longer provide
++// transitively.
++#include <iterator>
+ #include <vector>
+ #include <memory>
+

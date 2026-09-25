@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: libMesh `dof_object.h` missing `#include <iterator>`
+
+- **CI run**: macOS `36148836952` (failed at 40m in `Build libMesh`, TU `dof_map.C`) — the poly2tri fix held (contrib built clean; failure moved into libMesh proper).
+- **Error**: `include/libmesh/dof_object.h:511: error: no template named 'back_insert_iterator' in namespace 'std'` — the header uses `std::back_insert_iterator` but includes only `<cstddef> <cstring> <vector> <memory>`. Same lean-libc++ class as poly2tri.
+- **Deliberately not patched blindly**: a regex sweep over libMesh+contrib flagged ~200 headers, but most are false positives (umbrella includes, and TIMPI compiled clean despite being flagged). Patching on suspicion risks unmaintainable churn; each CI-proven (file, symbol, header) triple gets exactly one include. Pre-emptive sweeping rejected in favor of precise per-round fixes.
+- **Fix**: `patches/macos/libmesh.patch` (+ comment + `#include <iterator>`), wired into the existing `apply_macos_patches()` table (same idempotence contract).
+- **Verification**: dry-run + scratch-copy apply against pinned sources; `pytest` → 13 passed.
+- **Remaining uncertainty**: further lean-header TUs may surface in later rounds (same loop).
+
 ## 2026-09-25 — macOS: poly2tri missing `#include <ostream>` (follow-up in libMesh)
 
 - **CI run**: macOS `36137283766` (failed at 1h38m in `Build libMesh`) — notably, the `--disable-netgen` fix worked (no Netgen errors anywhere; the build progressed over an hour past the old failure point).
