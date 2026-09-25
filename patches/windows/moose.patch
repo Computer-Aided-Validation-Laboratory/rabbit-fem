@@ -19529,17 +19529,25 @@ index 0ab153e0..786387da 100644
 +
 +#endif // PARALLELSTUDY_H
 diff --git a/modules/ray_tracing/include/utils/SendBuffer.h b/modules/ray_tracing/include/utils/SendBuffer.h
-index 6186230f..e581c5f8 100644
+index 6186230f..86dd90fe 100644
 --- a/modules/ray_tracing/include/utils/SendBuffer.h
 +++ b/modules/ray_tracing/include/utils/SendBuffer.h
-@@ -15,6 +15,7 @@
+@@ -208,11 +208,15 @@ SendBuffer<Object, Context>::forceSend(const bool shrink_current_buffer_size)
+     _objects_sent += _buffer.size();
+     _buffers_sent++;
  
- // libMesh Includes
- #include "libmesh/parallel_object.h"
-+#include "libmesh/parallel_implementation.h"
++#if LIBMESH_HAVE_MPI
+     std::shared_ptr<std::vector<typename Parallel::Packing<std::shared_ptr<Object>>::buffer_type>>
+         buffer = _buffer_pool.acquire();
  
- // Local includes
- #include "ParallelStudyMethod.h"
+     comm().nonblocking_send_packed_range(
+         _pid, _context, _buffer.begin(), _buffer.end(), *req, buffer, _object_buffer_tag);
++#else
++    mooseError("Parallel study sending buffer is not supported without MPI.");
++#endif
+ 
+     _buffer.clear();
+     _buffer.reserve(_max_buffer_size);
 diff --git a/modules/solid_mechanics/src/utils/AbaqusUtils.C b/modules/solid_mechanics/src/utils/AbaqusUtils.C
 index c2c408f2..26af414b 100644
 --- a/modules/solid_mechanics/src/utils/AbaqusUtils.C
