@@ -514,9 +514,15 @@ def build_wheel(repo_dir: Path) -> Path:
                 repo_dir / ".venv" / "bin" / "wheel"
             )
         else:
-            platform_tag = (
-                "manylinux_2_35_x86_64.manylinux_2_38_x86_64.linux_x86_64"
-            )
+            # A wheel can contain compressed (dot-separated) platform tags,
+            # but each one is a separate compatibility promise.  Do not add
+            # the host ``linux_x86_64`` tag or a second manylinux baseline:
+            # they make the filename misleading and can cause PyPI installers
+            # to select the wheel on unsupported systems.
+            #
+            # The Linux build is produced against glibc 2.38, so publish the
+            # one corresponding PEP 600 platform tag.
+            platform_tag = "manylinux_2_38_x86_64"
             wheel_bin = shutil.which("wheel") or str(
                 repo_dir / ".venv" / "bin" / "wheel"
             )
@@ -525,6 +531,13 @@ def build_wheel(repo_dir: Path) -> Path:
             if (shutil.which(wheel_bin) or Path(wheel_bin).is_file())
             else [find_python_exe(), "-m", "wheel"]
         )
+        # ``wheel tags --remove`` removes only ``raw_whl``.  Clear earlier
+        # platform variants for this exact release so a subsequent upload does
+        # not accidentally pick up an obsolete compatibility declaration.
+        release_prefix = raw_whl.name.removesuffix("-py3-none-any.whl")
+        for existing_whl in dist_dir.glob(f"{release_prefix}-*.whl"):
+            if existing_whl != raw_whl:
+                existing_whl.unlink()
         print(f"--> Retagging wheel for platform: {platform_tag}")
         subprocess.run(
             wheel_cmd
@@ -536,8 +549,13 @@ def build_wheel(repo_dir: Path) -> Path:
             ],
             check=True,
         )
-        wheels = sorted(dist_dir.glob("*.whl"), key=os.path.getmtime)
-        latest_whl = wheels[-1]
+        latest_whl = raw_whl.with_name(
+            raw_whl.name.replace("none-any", f"none-{platform_tag}")
+        )
+        if not latest_whl.is_file():
+            raise FileNotFoundError(
+                "Retagged wheel was not generated: " f"{latest_whl}"
+            )
     else:
         latest_whl = raw_whl
 
