@@ -286,9 +286,10 @@ def build_rabbit_binary(
 def find_needed_libraries(
     binary_path: Path,
     available_libs: dict[str, Path],
-) -> dict[str, Path]:
+) -> tuple[dict[str, Path], set[str]]:
     """Find all needed sonames and map them to their concrete file paths."""
     resolved_libs: dict[str, Path] = {}
+    unresolved_libs: set[str] = set()
     queue: list[Path] = [binary_path]
     visited_binaries: set[Path] = set()
 
@@ -300,7 +301,9 @@ def find_needed_libraries(
         "librt.so",
         "libstdc++.so",
         "libgcc_s.so",
+        "ld-linux",
         "libmpi.so",
+        "libmpi_",
         "libmpi_cxx.so",
         "libopen-pal.so",
         "libopen-rte.so",
@@ -309,7 +312,16 @@ def find_needed_libraries(
         "libz.so",
         "libtirpc.so",
         "libgfortran.so",
+        "libquadmath.so",
         "libgomp.so",
+        "liblzma.so",
+        "libsz.so",
+        "libX11.so",
+        "libXau.so",
+        "libXdmcp.so",
+        "libxcb.so",
+        "libbsd.so",
+        "libmd.so",
         "libudev.so",
         "libkrb5",
         "libk5crypto",
@@ -367,10 +379,38 @@ def find_needed_libraries(
                             real_path = available_libs[soname].resolve()
                             resolved_libs[soname] = real_path
                             queue.append(real_path)
+                        else:
+                            unresolved_libs.add(soname)
         except Exception:
             pass
 
-    return resolved_libs
+    return resolved_libs, unresolved_libs
+
+
+def elf_library_search_dirs(binary_path: Path) -> list[Path]:
+    """Return absolute directories recorded in an ELF RPATH/RUNPATH."""
+    try:
+        result = subprocess.run(
+            ["readelf", "-d", str(binary_path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return []
+
+    search_dirs: list[Path] = []
+    for line in result.stdout.splitlines():
+        if "(RPATH)" not in line and "(RUNPATH)" not in line:
+            continue
+        match = re.search(r"\[(.*)\]", line)
+        if not match:
+            continue
+        for entry in match.group(1).split(":"):
+            path = Path(entry)
+            if path.is_absolute() and path.is_dir() and path not in search_dirs:
+                search_dirs.append(path)
+    return search_dirs
 
 
 def stage_artifacts(
@@ -398,7 +438,25 @@ def stage_artifacts(
             if p.is_file() and not p.name.endswith((".son", ".i")):
                 available_libs[p.name] = p
 
-    resolved_libs = find_needed_libraries(binary_path, available_libs)
+    # PETSc and other third-party libraries may live outside the source trees.
+    # Include the binary's recorded linker search paths so the staged closure
+    # reflects what the linker used, rather than only what happens to be under
+    # the repository checkout.
+    if sys.platform != "darwin":
+        for search_dir in elf_library_search_dirs(binary_path):
+            for p in search_dir.glob(lib_glob):
+                if p.is_file():
+                    available_libs[p.name] = p
+
+    resolved_libs, unresolved_libs = find_needed_libraries(
+        binary_path, available_libs
+    )
+    if unresolved_libs:
+        missing = ", ".join(sorted(unresolved_libs))
+        raise FileNotFoundError(
+            "Cannot create a standalone wheel; required shared libraries "
+            f"were not found: {missing}"
+        )
 
     if sys.platform != "darwin":
         import glob
