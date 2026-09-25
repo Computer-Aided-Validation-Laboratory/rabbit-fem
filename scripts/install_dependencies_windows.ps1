@@ -224,6 +224,31 @@ if ($needPetsc -or $needPetscSources) { $subsNeeded += "petsc" }
 if ($needLibmesh -or $needLibmeshSources) { $subsNeeded += "libmesh" }
 if ($needWasp -or $needWaspSources) { $subsNeeded += "framework/contrib/wasp" }
 
+# actions/cache restores built libs into hollow submodule dirs, which makes
+# 'git submodule update' refuse to clone ("already exists and is not an
+# empty directory"). Relocate restored build outputs aside so the clone can
+# proceed; they are moved back after a successful update. Orphaned backups
+# from killed runs are resurrected (or pruned if superseded) first.
+$submodulePreserve = @(
+    @{ Sub = "petsc"; Keep = "arch-windows-opt"; Sentinel = "configure" },
+    @{ Sub = "libmesh"; Keep = "installed"; Sentinel = "configure" }
+)
+$movedBackups = @()
+foreach ($sp in $submodulePreserve) {
+    $subDir = Join-Path $MooseDir $sp.Sub
+    $keepDir = Join-Path $subDir $sp.Keep
+    $backupDir = "$subDir.__rabbit_backup"
+    if (Test-Path $backupDir) {
+        if (Test-Path $keepDir) { Remove-Item -Recurse -Force $backupDir }
+        else { Move-Item $backupDir $keepDir }
+    }
+    if ((Test-Path $keepDir) -and -not (Test-Path (Join-Path $subDir $sp.Sentinel))) {
+        if (Test-Path $backupDir) { Remove-Item -Recurse -Force $backupDir }
+        Move-Item $keepDir $backupDir
+        $movedBackups += @{ Backup = $backupDir; Dest = $keepDir }
+    }
+}
+
 if ($subsNeeded.Count -gt 0) {
     $subsList = $subsNeeded -join " "
     $submoduleCmd = "cd moose && git config core.autocrlf false && git submodule sync --recursive $subsList && git submodule update --init --recursive $subsList"
@@ -242,6 +267,15 @@ if ($subsNeeded.Count -gt 0) {
             Start-Sleep -Seconds 30
             $attempt++
         }
+    }
+}
+
+# Restore relocated build outputs after a successful submodule update.
+# (On exhausted retries the throw below skips this; orphaned backups are
+# resurrected by the loop above on the next run.)
+foreach ($mb in $movedBackups) {
+    if ((Test-Path $mb.Backup) -and -not (Test-Path $mb.Dest)) {
+        Move-Item $mb.Backup $mb.Dest
     }
 }
 
