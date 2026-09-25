@@ -15,7 +15,7 @@ jobs:
   linux-build-and-test:
     name: "Linux: Build Wheel and Test"
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 360
 
     steps:
       - name: "Linux: Checkout repository"

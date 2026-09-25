@@ -1,5 +1,13 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — Release: shared caches with build-and-test + 360 min timeouts
+
+- **Why the v2026.9.3 release rebuilt everything**: `release.yml` used its own cache namespace (`linux/windows-moose-build-*`, own wheel keys) that no prior run had ever populated — first tag = guaranteed cold full rebuild on both runners (~1h+), not a hang.
+- **Fix**: release jobs now restore the *exact* per-stage caches (same keys, paths, ids, restore-keys) as the build-and-test workflows and save nothing — build-and-test runs own population, releases consume. A release on a previously built tree restores everything and only runs tests + packaging; a cold release builds exactly as before. Applies to Linux (4 stages) and Windows (4 stages); wheel keys aligned too.
+- **Timeouts**: all jobs in all four workflow files set to 360 min (GitHub-hosted max), including release publish.
+- **Files changed**: `.github/workflows/{release,linux_build_and_test,windows_build_and_test,macos_build_and_test}.yml` (timeouts); `release.yml` (cache alignment, dropped release-side saves).
+- **Verification**: YAML parses; no dangling step-id references; all `if:` conditions resolve to existing step ids. Live proof requires the next tag/dispatch run.
+
 ## 2026-09-25 — macOS: disable NetGen in libMesh build (SDK macro vs new libc++)
 
 - **CI runs**: macOS `36111456669` (33m), `36110525881` (44m), `36130962168` (32m) — all fail identically in the libMesh dependency stage (`update_and_rebuild_libmesh.sh --with-mpi`).

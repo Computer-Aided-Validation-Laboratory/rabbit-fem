@@ -19,7 +19,7 @@ jobs:
   build-linux:
     name: "Linux: Build and Verify Wheel"
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 360
 
     steps:
       - name: "Linux: Checkout repository"
@@ -57,6 +57,10 @@ jobs:
         run: |
           uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh
 
+      # Wheel and dependency caches use the exact same keys and paths as
+      # linux_build_and_test.yml, so a release on a previously built tree
+      # restores everything and only runs tests and packaging. This job
+      # never saves caches; the build-and-test workflows own population.
       - name: "Linux: Restore wheel cache"
         uses: actions/cache/restore@v4
         id: wheel-cache
@@ -65,35 +69,58 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
-      - name: "Linux: Restore MOOSE cache"
+      # --- Stage 1: PETSc Dependency ---
+      - name: "Linux: Restore PETSc cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
-        id: moose-cache
+        id: petsc-cache
+        with:
+          path: moose/petsc
+          key: linux-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            linux-petsc-
+
+      # --- Stage 2: libMesh Dependency ---
+      - name: "Linux: Restore libMesh cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: libmesh-cache
+        with:
+          path: moose/libmesh/installed
+          key: linux-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            linux-libmesh-
+
+      # --- Stage 3: WASP and HIT Dependency ---
+      - name: "Linux: Restore WASP cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: wasp-cache
         with:
           path: |
-            moose/petsc
-            moose/libmesh/installed
             moose/framework/contrib/wasp/install
-            moose/framework/include/base/MooseConfig.h
-          key: linux-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
+            moose/framework/contrib/hit
+          key: linux-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            linux-wasp-
+
+      # --- Stage 4: MOOSE Framework Configuration ---
+      - name: "Linux: Restore MOOSE Config cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mooseconfig-cache
+        with:
+          path: moose/framework/include/base/MooseConfig.h
+          key: linux-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            linux-mooseconfig-
 
       - name: "Linux: Build MOOSE dependencies"
-        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.moose-cache.outputs.cache-hit != 'true'
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
         run: |
           uv run python build_rabbit.py --moose
-
-      - name: "Linux: Save MOOSE cache"
-        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.moose-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            moose/petsc
-            moose/libmesh/installed
-            moose/framework/contrib/wasp/install
-            moose/framework/include/base/MooseConfig.h
-          key: linux-moose-build-${{ hashFiles('moose_version.txt', 'build_rabbit.py') }}
 
       - name: "Linux: Build Rabbit, stage artifacts, and build wheel"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
@@ -103,16 +130,6 @@ jobs:
       - name: "Linux: Run test suite"
         run: |
           uv run python build_rabbit.py --test
-
-      - name: "Linux: Save wheel cache"
-        if: steps.wheel-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            dist
-            src/rabbit/bin
-            src/rabbit/lib
-          key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'build_rabbit.py') }}
 
       - name: "Linux: Upload wheel artifact"
         uses: actions/upload-artifact@v4
@@ -124,7 +141,7 @@ jobs:
   build-windows:
     name: "Windows: Build and Verify Wheel"
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
 
     steps:
       - name: "Windows: Configure git long paths"
@@ -163,6 +180,10 @@ jobs:
           uv python install 3.13
           uv venv .venv
 
+      # Wheel and dependency caches use the exact same keys and paths as
+      # windows_build_and_test.yml, so a release on a previously built tree
+      # restores everything and only runs tests and packaging. This job
+      # never saves caches; the build-and-test workflows own population.
       - name: "Windows: Restore wheel cache"
         uses: actions/cache/restore@v4
         id: wheel-windows-cache
@@ -170,39 +191,59 @@ jobs:
           path: |
             dist
             src/rabbit/bin
-          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'build_rabbit.py', 'patches/**') }}
+          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
 
-      - name: "Windows: Restore MOOSE cache"
+      # --- Stage 1: PETSc Dependency ---
+      - name: "Windows: Restore PETSc cache"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
-        id: moose-windows-cache
+        id: petsc-windows-cache
+        with:
+          path: moose/petsc/arch-windows-opt
+          key: windows-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          restore-keys: |
+            windows-petsc-
+
+      # --- Stage 2: libMesh Dependency ---
+      - name: "Windows: Restore libMesh cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: libmesh-windows-cache
+        with:
+          path: moose/libmesh/installed
+          key: windows-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          restore-keys: |
+            windows-libmesh-
+
+      # --- Stage 3: WASP and HIT Dependency ---
+      - name: "Windows: Restore WASP cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: wasp-windows-cache
         with:
           path: |
-            moose/petsc/arch-windows-opt
-            moose/libmesh/installed
             moose/framework/contrib/wasp/install
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
-            moose/framework/include/base/MooseConfig.h
-          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          key: windows-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          restore-keys: |
+            windows-wasp-
+
+      # --- Stage 4: MOOSE Framework Configuration ---
+      - name: "Windows: Restore MOOSE Config cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mooseconfig-windows-cache
+        with:
+          path: moose/framework/include/base/MooseConfig.h
+          key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          restore-keys: |
+            windows-mooseconfig-
 
       - name: "Windows: Build MOOSE dependencies and Rabbit"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
         run: |
           powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -SkipTests
-
-      - name: "Windows: Save MOOSE cache"
-        if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.moose-windows-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            moose/petsc/arch-windows-opt
-            moose/libmesh/installed
-            moose/framework/contrib/wasp/install
-            moose/framework/contrib/wasp/build
-            moose/framework/contrib/hit/hit.exe
-            moose/framework/include/base/MooseConfig.h
-          key: windows-moose-build-${{ hashFiles('moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
 
       - name: "Windows: Package standalone wheel"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
@@ -212,15 +253,6 @@ jobs:
       - name: "Windows: Run test suite"
         run: |
           uv run python build_rabbit.py --test
-
-      - name: "Windows: Save wheel cache"
-        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            dist
-            src/rabbit/bin
-          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'build_rabbit.py', 'patches/**') }}
 
       - name: "Windows: Upload wheel artifact"
         uses: actions/upload-artifact@v4
@@ -233,7 +265,7 @@ jobs:
     name: "Publish Consolidated Release to PyPI"
     needs: [build-linux, build-windows]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 360
     environment:
       name: pypi
       url: https://pypi.org/p/rabbit-fem
