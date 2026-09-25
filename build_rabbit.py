@@ -275,6 +275,13 @@ def main() -> None:
     # Fail early if materialized submodules drift from moose_deps.txt
     verify_moose_deps(moose_dir, repo_dir)
 
+    # macOS headers need portability patches before any compile (the
+    # framework build below includes third-party headers directly).
+    if sys.platform == "darwin":
+        from scripts.build.darwin import apply_macos_patches
+
+        apply_macos_patches(moose_dir, repo_dir)
+
     # 2. Discrete dependency stages
     if args.build_petsc:
         build_petsc_stage(repo_dir, moose_dir, zigcc_path, zigcxx_path)

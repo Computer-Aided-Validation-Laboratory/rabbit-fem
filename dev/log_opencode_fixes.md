@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: tinyhttp missing `#include <algorithm>`/`<functional>`
+
+- **CI run**: macOS `36165248598` (failed at 10m in `Build Rabbit` — fast because warm caches skipped all dep builds; notably libMesh+WASP+config all green on mac for the first time).
+- **Error**: `tinyhttp/http.h:186/200/384: no member named 'transform' / no template named 'function'` — header uses `std::transform`/`std::function` but includes neither. Same lean-libc++ class.
+- **Fix**: `patches/macos/tinyhttp.patch` (generated via `diff -u` after learning hand-written hunks risk malformation), wired into `apply_macos_patches()`; that helper is now also invoked from `build_rabbit.py::main()` behind `sys.platform == "darwin"` so framework-level headers are patched before the Rabbit compile on every macOS flow (stages run separately in CI).
+- **Files changed**: `patches/macos/tinyhttp.patch` (new), `scripts/build/darwin.py`, `build_rabbit.py` (darwin-gated call), `test/test_darwin.py`.
+- **Verification**: dry-run + scratch-copy apply + idempotence; `pytest` → 15 passed.
+- **Remaining uncertainty**: further lean-header TUs may surface in later rounds (same loop).
+
 ## 2026-09-25 — macOS: WASP `Format.h` missing `#include <type_traits>`
 
 - **CI run**: macOS `36153829049` (failed at 1h7m in `Build WASP and HIT`, TU `waspexpr/ExprContext.cpp`) — libMesh incl. both prior patches built clean; failure moved into WASP.

@@ -1,0 +1,14 @@
+--- a/include/tinyhttp/http.h
++++ b/include/tinyhttp/http.h
+@@ -56,6 +56,11 @@
+ #include <list>
+ #include <chrono>
+ #include <variant>
++// Required explicitly: this header uses std::transform and
++// std::function, which newer libc++ versions (e.g. Homebrew LLVM 23)
++// no longer provide transitively.
++#include <algorithm>
++#include <functional>
+ 
+ #ifdef TINYHTTP_THREADING
+ #include <thread>

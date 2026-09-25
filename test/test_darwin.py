@@ -33,6 +33,7 @@ REPO_ROOT = Path(darwin.__file__).resolve().parent.parent.parent
 REAL_PATCH = REPO_ROOT / "patches" / "macos" / "poly2tri.patch"
 REAL_LIBMESH_PATCH = REPO_ROOT / "patches" / "macos" / "libmesh.patch"
 REAL_WASP_PATCH = REPO_ROOT / "patches" / "macos" / "wasp.patch"
+REAL_TINYHTTP_PATCH = REPO_ROOT / "patches" / "macos" / "tinyhttp.patch"
 
 
 def _run_build_libmesh(
@@ -215,3 +216,46 @@ def test_wasp_patch_applies_to_pristine_tree(tmp_path: Path) -> None:
 
     darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
     assert (target / "Format.h").read_text(encoding="utf-8") == patched
+
+
+@pytest.mark.skipif(
+    shutil.which("patch") is None, reason="patch utility not available"
+)
+def test_tinyhttp_patch_applies_to_pristine_tree(tmp_path: Path) -> None:
+    """The macOS tinyhttp patch must apply to the real pinned sources."""
+    assert REAL_TINYHTTP_PATCH.is_file()
+    content = REAL_TINYHTTP_PATCH.read_text(encoding="utf-8")
+    assert "include/tinyhttp/http.h" in content
+    assert "#include <algorithm>" in content
+    assert "#include <functional>" in content
+
+    repo_dir = tmp_path / "repo"
+    target = (
+        tmp_path / "moose" / "framework" / "contrib" / "tinyhttp"
+        / "include" / "tinyhttp"
+    )
+    target.mkdir(parents=True)
+    shutil.copy(
+        REPO_ROOT
+        / "moose"
+        / "framework"
+        / "contrib"
+        / "tinyhttp"
+        / "include"
+        / "tinyhttp"
+        / "http.h",
+        target / "http.h",
+    )
+    (repo_dir / "patches" / "macos").mkdir(parents=True)
+    shutil.copy(
+        REAL_TINYHTTP_PATCH,
+        repo_dir / "patches" / "macos" / REAL_TINYHTTP_PATCH.name,
+    )
+
+    darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
+    patched = (target / "http.h").read_text(encoding="utf-8")
+    assert "#include <algorithm>" in patched
+    assert "#include <functional>" in patched
+
+    darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
+    assert (target / "http.h").read_text(encoding="utf-8") == patched
