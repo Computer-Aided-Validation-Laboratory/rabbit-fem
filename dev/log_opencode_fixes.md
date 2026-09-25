@@ -1,5 +1,41 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — Windows: Rabbit-stage HIT rebuild links MinGW g++ against Zig libc++ WASP libs
+
+- **CI run**: Windows `36109996543` (failure, 8m33s) on commit `806b786` — full rebuild (all dependency stages ran and passed, including new `Ensuring * Windows patch` + `Verifying MOOSE Windows patch` steps and `Skipping pycapabilities on Windows...`).
+- **Step**: `Windows: Build Rabbit application` → `make[1]: *** [Makefile:61: hit] Error 1`, then `make: *** [moose.mk:227: .../hit/hit.pyd] Error 2`.
+
+### Root cause
+
+- The Windows `hit` stub in `patches/windows/moose.patch` ran `cd $(HIT_DIR) && $(MAKE)` with no `CXX` override (unlike the WASP stage, which builds HIT with `CXX=zig-cxx`). The recursive make therefore linked with a MinGW `g++` from the runner `PATH` (`C:/mingw64/.../ld.exe` via `collect2.exe`), whose GNU `libstdc++` cannot link the Zig-built `libwasphit.a` (libc++ `std::__1` symbols: `ios_base::clear/init`, `cin`/`cout`/`cerr`, iostream vtables) → `undefined reference to 'std::__1::...'`.
+- Symptom vs cause: looks like a WASP/HIT incompatibility with Windows, but WASP itself built fine — the failure is a toolchain mismatch in a redundant second HIT build. The WASP stage already produces a correct Zig `hit`/`hit.exe`; the Rabbit-stage rebuild adds nothing (and `hit.pyd`, like `_pycapabilities`, is a test-harness Python extension never linked into `rabbit-opt.exe`).
+
+### Why this fix addresses the root cause
+
+- Changed the Windows `hit` rule in `patches/windows/moose.patch` to skip the recursive `$(MAKE)`: it verifies the WASP-stage `hit.exe`/`hit` exists (failing early with `ERROR: HIT executable missing; run the WASP stage first` instead of silently proceeding) and touches `$(pyhit_LIB)`, mirroring the `pycapabilities` stub rationale. This removes the mixed-toolchain link rather than papering over it (e.g. no forced `-lstdc++`/`-lc++` juggling, no runner-specific compiler path).
+- Verified without touching the local in-progress build: extracted pristine `framework/moose.mk` at the pinned commit (`73c6aa53`) to `/tmp`, extracted the `framework/moose.mk` hunks, `patch -p1 --dry-run` → exit 0 (edited hunk applies cleanly), full apply → Windows branch contains the skip rule and the `else` upstream branch is byte-identical.
+
+### Platform-specific considerations
+
+- Windows-only: change lives inside the existing `ifeq ($(findstring NT,...))` block of `patches/windows/moose.patch`; Linux/macOS `moose.mk` path untouched (local `moose/` is unpatched and mid-build — left alone).
+- Kept LF line endings + tabs consistent with neighbouring `+` lines (`git diff --check` clean); bumped the hunk header count 19→20 for the added line.
+- `test -x` works on MSYS POSIX paths used by the make recipes; both `hit.exe` (Windows) and `hit` (MSYS-stage copy) names accepted.
+
+### Files changed
+
+- `patches/windows/moose.patch` (Windows `hit` rule: skip rebuild, verify `hit.exe`/`hit`, touch `hit.pyd`).
+- `dev/log_windows_patches.md` (documented HIT skip + MinGW/Zig libc++ rationale).
+
+### How to verify
+
+- Next `Windows: Build Wheel and Test` full or cache-hit run: Rabbit stage should print `Skipping HIT rebuild on Windows (using WASP-stage hit.exe)...` and proceed to compile/link `rabbit-opt.exe`. If the WASP stage regresses, the build fails early with `ERROR: HIT executable missing`.
+- Scratch check (repeatable): extract `git -C moose show HEAD:framework/moose.mk`, extract `framework/moose.mk` hunks from the patch, `patch -p1 --dry-run` → 0.
+
+### Remaining uncertainty
+
+- Whether anything in the Rabbit link actually consumes `hit.pyd` at build time (evidence says no: prior local Windows build linked `rabbit-opt.exe` with only a touched `hit.pyd`; will confirm when a green Windows run links).
+- The `framework/contrib/wasp` gitlink `-dirty` hunk in `moose.patch` can report `Hunk #1 FAILED` on re-application; tolerated (exit 1) by the §5.6 ensure step and unrelated to this fix.
+
 ## 2026-09-25 — All OS: broken `pyproject.toml` version string (fast fail)
 
 - **CI runs**: Linux `36109996335` (failure, 1m11s), macOS `36109996320` (failure, 1m35s), and prior round `36109533928/36109533935` fast failures, all on commit `806b786` (which inherited the breakage from `0d65386`).

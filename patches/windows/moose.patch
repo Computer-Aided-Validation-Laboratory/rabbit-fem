@@ -15520,14 +15520,15 @@ index f6af47c2..a2a9d52f 100644
  	libmesh_LDFLAGS    += -no-undefined
  	PYMOD_EXTENSION    := pyd
  	PYMOD_COMPILEFLAGS := $(shell $(pyconfig) --cflags --ldflags --libs)
-@@ -221,6 +221,19 @@ $(pyhit_srcfiles) $(hit_CLI_srcfiles): | prebuild
+@@ -221,6 +221,20 @@ $(pyhit_srcfiles) $(hit_CLI_srcfiles): | prebuild
  pyhit_LIB          := $(HIT_DIR)/hit.$(PYMOD_EXTENSION)
  pyhit_COMPILEFLAGS += $(PYMOD_COMPILEFLAGS) $(wasp_CXXFLAGS) $(wasp_LDFLAGS)
  
 +ifeq ($(findstring NT,$(shell uname)),NT)
 +hit $(pyhit_LIB) $(hit_CLI): $(pyhit_srcfiles) $(hit_CLI_srcfiles)
-+	@echo "Building HIT on Windows..."
-+	@bash -c '(cd "$(HIT_DIR)" && $(MAKE))'
++	@echo "Skipping HIT rebuild on Windows (using WASP-stage hit.exe)..."
++	@test -x "$(HIT_DIR)/hit.exe" -o -x "$(HIT_DIR)/hit" || (echo "ERROR: HIT executable missing; run the WASP stage first"; exit 1)
++	@mkdir -p $(HIT_DIR)
 +	@touch $(pyhit_LIB)
 +
 +pycapabilities_LIBNAME      := _pycapabilities.$(PYMOD_EXTENSION)
