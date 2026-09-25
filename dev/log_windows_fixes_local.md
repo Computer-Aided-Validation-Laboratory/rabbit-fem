@@ -21,13 +21,14 @@ This document logs all issues encountered during clean local builds on Windows a
 | **Stage 2: libMesh** | Submodule checkout, symlink conversion, configure, and compilation. | **PASSED** | **Fix**: `scripts/install_dependencies_windows.ps1` previously passed `--with-petsc=...` instead of setting `PETSC_DIR` and `PETSC_ARCH` environment/command-line variables. This caused libMesh configure to disable PETSc (`#undef HAVE_PETSC`). Updated install script to export and pass `PETSC_DIR` and `PETSC_ARCH`, restoring full PETSc support (`#define HAVE_PETSC 1`). Built and installed `moose/libmesh/installed/lib/libmesh_opt.a`. |
 | **Stage 3: WASP & HIT** | CMake configure & build with Make and `hit.exe` compiler. | **PASSED** | **Fix 1**: `scripts/install_dependencies_windows.ps1` patch application lacked `|| true` on WASP, NetCDF, and METIS, causing re-runs to fail when patches were already present. Added `|| true` to all patch steps.<br>**Fix 2**: `cc_wrapper.py` and `cxx_wrapper.py` stripped `-MD` as an MSVC flag, leaving `-MT <target>` arguments orphaned as positional compiler inputs, which broke CMake TryCompile with `failed to open object ...: FileNotFound`. Removed `-MD`/`-MT` from `msvc_flags` (preserving GCC/Clang dependency generation) and ensured parent directories are auto-created for `-o` / `-MF` / archive outputs. Built `hit.exe`. |
 | **Stage 4: MOOSE Config** | MOOSE framework configure (`--with-derivative-size=89`). | **PASSED** | Generated `MooseConfig.h`. |
-| **Stage 5: Rabbit App & Wheel** | Application build, staging `rabbit.exe`, wheel packaging & pytest verification. | **PASSED** | **Fix 1 (Unity generator)**: `userobjects_Unity.C` truncated due to MSYS2 subshell limits in GNU Make. Created `moose/scripts/make_unity.py`.<br>**Fix 2 (Nemesis_IO)**: Guarded uncompiled Nemesis copy methods in `SolutionUserObjectBase.C` with `LIBMESH_HAVE_NEMESIS_API`.<br>**Fix 3 (Data directory check)**: `Registry::determineDataFilePath` called `ifstream` on directory paths, failing on Windows. Switched to `std::filesystem::exists`.<br>**Fix 4 (Range check integer overflow)**: `InputParameters::parameterRangeCheck` upcast `unsigned int` to 32-bit signed `long` on Windows (LLP64), causing `UINT_MAX` to overflow to `-1` and fail `time_step_interval > 0`. Switched upcast type to `Real` (`double`).<br>**Result**: Built `rabbit-opt.exe` and `rabbit_fem-2026.9.0-py3-none-win_amd64.whl` (26.82 MB). All 10 pytest simulation cases passed (100%). |
+| **Stage 5: Rabbit App & Wheel (Local)** | Application build, staging `rabbit.exe`, wheel packaging & pytest verification on `C:` drive. | **PASSED** | **Fix 1 (Unity generator)**: `userobjects_Unity.C` truncated due to MSYS2 subshell limits in GNU Make. Created `moose/scripts/make_unity.py`.<br>**Fix 2 (Nemesis_IO)**: Guarded uncompiled Nemesis copy methods in `SolutionUserObjectBase.C` with `LIBMESH_HAVE_NEMESIS_API`.<br>**Fix 3 (Data directory check)**: `Registry::determineDataFilePath` called `ifstream` on directory paths, failing on Windows. Switched to `std::filesystem::exists`.<br>**Fix 4 (Range check integer overflow)**: `InputParameters::parameterRangeCheck` upcast `unsigned int` to 32-bit signed `long` on Windows (LLP64), causing `UINT_MAX` to overflow to `-1` and fail `time_step_interval > 0`. Switched upcast type to `Real` (`double`).<br>**Result**: Built `rabbit-opt.exe` and `rabbit_fem-2026.9.0-py3-none-win_amd64.whl` (26.82 MB). All 10 pytest simulation cases passed (100%). |
+| **Stage 6: Clean Slate CI Simulation on Virtual `D:` Drive** | Replicate exact GitHub Actions clean slate on virtual drive `D:\rabbit-fem` (`subst D: C:\rabbit-fem-ci-sim`). Full build from scratch: submodules, PETSc, libMesh, WASP/HIT, MOOSE, and Rabbit app. | **PASSED** | **Fix (MPI Range Send Guard)**: In serial mode (PETSc MPIUNI / `#undef HAVE_MPI`), template function `Communicator::nonblocking_send_packed_range` in `moose/modules/ray_tracing/include/utils/SendBuffer.h` caused link error `undefined symbol: TIMPI::Communicator::nonblocking_send_packed_range`. Guarded `SendBuffer::forceSend` with `#if LIBMESH_HAVE_MPI`.<br>**Result**: Clean slate full build completed in ~14 minutes on `D:`. Built wheel `rabbit_fem-2026.9.0-py3-none-win_amd64.whl` (26.82 MB). All 10 pytest test cases passed (100%). |
 
 ---
 
 ## 2. Why Local Windows Builds Work vs Why CI Was So Brittle
 
-The reason the build succeeded locally while breaking in GitHub Actions CI comes down to **nine fundamental architectural divergence vectors** between a persistent local Windows machine and an ephemeral GitHub Actions `windows-latest` runner:
+The reason the build succeeded locally while breaking in GitHub Actions CI comes down to **ten fundamental architectural divergence vectors** between a persistent local Windows machine and an ephemeral GitHub Actions `windows-latest` runner:
 
 ### Vector 1: Workspace Drive Letters & POSIX Mount Resolution
 - **Local Machine**: The workspace resides on the primary system drive `C:\Users\longb\rabbit-fem` (`/c/Users/longb/...`).
@@ -71,14 +72,19 @@ The reason the build succeeded locally while breaking in GitHub Actions CI comes
 - **Problem**: On Windows (LLP64), `sizeof(long)` is 4 bytes (32-bit signed), unlike Linux (LP64) where `long` is 8 bytes. `InputParameters::parameterRangeCheck` upcast `unsigned int` to `long`. When parameters were initialized to `std::numeric_limits<unsigned int>::max()` (4,294,967,295), the 32-bit cast overflowed to `-1`, causing valid default ranges (like `time_step_interval > 0`) to fail at simulation launch.
 - **Fix**: Upcast `unsigned int` and `unsigned long` to `Real` (`double`), preserving the full unsigned range without sign overflow.
 
+### Vector 10: Non-blocking MPI Range Sends Under Serial MPIUNI Mode
+- **Problem**: When compiled with PETSc MPIUNI (serial uniprocessor mode, `#undef HAVE_MPI`), TIMPI's non-blocking range-based send functions are stubbed out (`timpi_not_implemented()`). MOOSE's `ray_tracing` module called `comm().nonblocking_send_packed_range(...)` in `SendBuffer::forceSend`. Because `forceSend` is instantiated only when template methods are expanded across unity translation units, Clang emitted an undefined reference at link time.
+- **Fix**: Guarded MPI buffer dispatch in `SendBuffer::forceSend` with `#if LIBMESH_HAVE_MPI`.
+
 ---
 
 ## 3. Current Remediation Strategy
 
-All nine divergence vectors are now unified directly into the repository scripts and patch files:
+All ten divergence vectors are now unified directly into the repository scripts and patch files:
 1. **`scripts/windows_wrappers/wrapper_utils.py`**: Intercepts all paths, normalizes both `C:` and `D:` drives (`/d/...` -> `D:/...`), and resolves `/tmp` -> `C:/msys64/tmp`.
 2. **`moose/scripts/make_unity.py` & `patches/windows/moose.patch`**: Fast, reliable unity file generation without MSYS2 subshell exhaustion.
 3. **`patches/windows/petsc.patch`**: Broadens library path parsing in `libraries.py` to handle both POSIX and Windows drive letters.
 4. **`patches/windows/wasp.patch`**: Sets `CMAKE_DEPENDS_USE_COMPILER FALSE` to prevent CMake from writing drive-letter colons into Makefiles.
 5. **`scripts/install_dependencies_windows.ps1`**: Installs all required MSYS2 packages (`diffutils`, `make`, `patch`, `m4`, `git`, `python`, `cmake`) idempotently.
+
 
