@@ -258,6 +258,109 @@ def test_binary_and_library_relocatability(tmp_path: Path) -> None:
         assert len(exodus_files) >= 1
         assert exodus_files[0].stat().st_size > 0
 
+    elif sys.platform == "darwin":
+        # macOS Mach-O relocatability checks via otool
+        def _get_linked_libs(macho_path: Path) -> list[str]:
+            res = subprocess.check_output(
+                ["otool", "-L", str(macho_path)], text=True
+            )
+            libs: list[str] = []
+            for line in res.splitlines()[1:]:
+                stripped = line.strip()
+                if stripped:
+                    libs.append(stripped.split()[0])
+            return libs
+
+        def _get_rpaths(macho_path: Path) -> list[str]:
+            res = subprocess.check_output(
+                ["otool", "-l", str(macho_path)], text=True
+            )
+            rpaths: list[str] = []
+            in_rpath = False
+            for line in res.splitlines():
+                stripped = line.strip()
+                if stripped == "cmd LC_RPATH":
+                    in_rpath = True
+                elif stripped.startswith("cmd "):
+                    in_rpath = False
+                elif in_rpath and stripped.startswith("path "):
+                    rpaths.append(stripped.split()[1])
+                    in_rpath = False
+            return rpaths
+
+        # 1. Linked libraries must not contain hardcoded user or build dirs
+        linked_libs = _get_linked_libs(rabbit_bin)
+        assert linked_libs, "No linked libraries found in rabbit binary"
+        for dep in linked_libs:
+            if dep.startswith("@"):
+                continue
+            for forbidden in ("/Users/", "/home/", "/tmp/", "/opt/moose"):
+                assert forbidden not in dep, (
+                    f"Forbidden hardcoded path '{dep}' linked by rabbit binary"
+                )
+
+        # 2. All RPATHs on the binary and bundled dylibs must be
+        # @loader_path-relative (never absolute build directories)
+        macho_files = [rabbit_bin]
+        if lib_dir.is_dir():
+            macho_files.extend(
+                f
+                for f in lib_dir.glob("*.dylib*")
+                if f.is_file() and not f.is_symlink()
+            )
+        for macho_file in macho_files:
+            for rpath in _get_rpaths(macho_file):
+                assert rpath.startswith("@loader_path"), (
+                    f"Non-relocatable RPATH '{rpath}' in {macho_file.name}"
+                )
+                for forbidden in ("/Users/", "/home/", "/tmp/", "/opt/moose"):
+                    assert forbidden not in rpath
+
+        # 3. Relocated execution: copy binary and bundled libs to an
+        # isolated directory, strip build environment variables, and run
+        # a real solve there
+        isolated_dir = tmp_path / "rabbit_isolated"
+        isolated_lib = isolated_dir / "lib"
+        isolated_dir.mkdir(parents=True, exist_ok=True)
+        isolated_lib.mkdir(parents=True, exist_ok=True)
+        isolated_bin = isolated_dir / "rabbit"
+        shutil.copy2(rabbit_bin, isolated_bin)
+        if lib_dir.is_dir():
+            for staged_lib in lib_dir.glob("*.dylib*"):
+                if staged_lib.is_file():
+                    shutil.copy2(staged_lib, isolated_lib / staged_lib.name)
+        os.chmod(isolated_bin, 0o755)
+
+        clean_env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith(
+                ("MOOSE", "PETSC", "SLEPC", "LIBMESH", "LD_LIBRARY", "DYLD_")
+            )
+        }
+        res_version = subprocess.run(
+            [str(isolated_bin), "--version"],
+            env=clean_env,
+            capture_output=True,
+            text=True,
+            cwd=str(isolated_dir),
+        )
+        assert res_version.returncode == 0
+        assert "Application Version" in res_version.stdout
+
+        input_path = cube_thermomech_input_path(EElemType.HEX8)
+        res_solve = subprocess.run(
+            [str(isolated_bin), "-i", str(input_path)],
+            env=clean_env,
+            capture_output=True,
+            text=True,
+            cwd=str(isolated_dir),
+        )
+        assert res_solve.returncode == 0
+        exodus_files = list(isolated_dir.glob("*.e"))
+        assert len(exodus_files) >= 1
+        assert exodus_files[0].stat().st_size > 0
+
     else:
         # Linux ELF relocatability checks
         def _get_rpath(elf_path: Path) -> str:

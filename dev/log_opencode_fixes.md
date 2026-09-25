@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: relocatability test shelled to Linux-only `readelf`
+
+- **CI run**: macOS `36169255744` (failed at 12m in `Run test suite`, `9 passed, 1 failed`) — the actual product is green on mac: `rabbit-opt` linked, 40 libs staged, wheel built (45 MB), and all 9 sim tests passed.
+- **Root cause**: `test_binary_and_library_relocatability` branched `win32` vs *everything else*, so macOS ran the Linux ELF path and died on `FileNotFoundError: 'readelf'`. Test bug, not product bug.
+- **Fix**: new `darwin` branch using native `otool -L` (no hardcoded user/build dirs in linked paths) and `otool -l` (all RPATHs `@loader_path`-relative) plus relocated execution (copy binary + dylibs to an isolated dir with build env stripped, `--version` + real HEX8 solve + Exodus output) — the same three invariants as the Linux/Windows branches, expressed with platform tools. Deliberately no must-be-bundled assertion (can't distinguish legitimate shared MPI from leaks; isolated execution is the behavioral proof — same bar as the other branches).
+- **Files changed**: `test/test_simulations.py` (darwin branch only; win32/Linux paths byte-identical).
+- **Verification**: parser logic executed against realistic canned `otool` output (linked-lib tokenization incl. `@rpath`, LC_RPATH state machine incl. bad-path capture); `py_compile` + unit suite → 22 passed. Full proof is the mac PR round (test executes on the runner).
+- **Remaining uncertainty**: none on mechanism. (Also noted but out of scope: `install_name_tool` printed errors on two staged dylibs during packaging with `check=False` — staging completed anyway; the new RPATH assertions will confirm or deny final state.)
+
 ## 2026-09-25 — macOS: `conf_vars.mk` never cached alongside `MooseConfig.h`
 
 - **CI run**: macOS `36171696370` (failed at 10m in `Build Rabbit`, `PNGOutput.h: fatal error: 'png.h'`) — warm caches, fresh `Configure MOOSE` skipped.
