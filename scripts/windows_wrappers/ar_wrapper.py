@@ -64,6 +64,13 @@ def main() -> int:
     zig_cmd = find_zig_binary() + ["ar"]
     transformed = transform_ar_args(sys.argv[1:])
 
+    # Ensure parent directory exists for archive target
+    if len(transformed) >= 2:
+        archive_path = transformed[1]
+        parent = os.path.dirname(archive_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
     # If transformed command line exceeds Windows 30k limit, use temp rsp
     total_len = sum(len(a) + 1 for a in transformed)
     temp_rsp_path = None

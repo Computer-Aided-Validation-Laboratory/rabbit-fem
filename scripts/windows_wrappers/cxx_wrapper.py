@@ -8,6 +8,7 @@ import sys
 import tempfile
 from typing import List
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from wrapper_utils import find_zig_binary, posix_to_win, process_wl_arg
 
 
@@ -16,9 +17,10 @@ def transform_args(args: List[str]) -> List[str]:
     result: List[str] = []
     has_target = False
 
-    # MSVC flags that conflict with GNU/Clang CLI
+    # MSVC-only flags that conflict with GNU/Clang CLI
+    # Note: Do NOT filter -MD or -MT here as they are standard GCC/Clang dependency generation flags!
     msvc_flags = {
-        "-MT", "-MTd", "-MD", "-MDd",
+        "-MTd", "-MDd",
         "/MT", "/MTd", "/MD", "/MDd",
         "-Oy-", "/Oy-", "-threads", "/threads",
         "-lstdc++fs",
@@ -97,6 +99,21 @@ def transform_args(args: List[str]) -> List[str]:
 def main() -> int:
     zig_cmd = find_zig_binary() + ["c++"]
     transformed = transform_args(sys.argv[1:])
+
+    # Ensure parent directories exist for output targets (-o, -MF)
+    for i, a in enumerate(transformed):
+        if a in ("-o", "-MF") and i + 1 < len(transformed):
+            parent = os.path.dirname(transformed[i + 1])
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+        elif a.startswith("-o") and len(a) > 2 and not a.startswith(("-opt", "-O")):
+            parent = os.path.dirname(a[2:])
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+        elif a.startswith("-MF") and len(a) > 3:
+            parent = os.path.dirname(a[3:])
+            if parent:
+                os.makedirs(parent, exist_ok=True)
 
     # If transformed command line exceeds Windows 30k limit, use temp rsp
     total_len = sum(len(a) + 1 for a in transformed)
