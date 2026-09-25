@@ -36,6 +36,7 @@ jobs:
             gcc \
             llvm \
             libomp \
+            libpng \
             hdf5-mpi \
             bison \
             flex \
@@ -71,7 +72,7 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
       - name: "macOS: Restore PETSc cache"
@@ -80,7 +81,7 @@ jobs:
         id: petsc-cache
         with:
           path: moose/petsc
-          key: macos-petsc-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
             macos-petsc-
 
@@ -94,7 +95,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/petsc
-          key: macos-petsc-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 2: libMesh Dependency ---
       - name: "macOS: Restore libMesh cache"
@@ -103,7 +104,7 @@ jobs:
         id: libmesh-cache
         with:
           path: moose/libmesh/installed
-          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
             macos-libmesh-
 
@@ -117,7 +118,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/libmesh/installed
-          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "macOS: Restore WASP cache"
@@ -128,7 +129,7 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: macos-wasp-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
             macos-wasp-
 
@@ -144,7 +145,7 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: macos-wasp-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 4: MOOSE Framework Configuration ---
       - name: "macOS: Restore MOOSE Config cache"
@@ -153,7 +154,7 @@ jobs:
         id: mooseconfig-cache
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
             macos-mooseconfig-
 
@@ -167,7 +168,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 5: Build Rabbit Application and Wheel ---
       - name: "macOS: Build Rabbit, stage artifacts, and build wheel"
@@ -187,7 +188,7 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       - name: "macOS: Upload wheel artifact"
         uses: actions/upload-artifact@v4

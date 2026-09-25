@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: libpng metadata without headers breaks MOOSE configure contract
+
+- **CI run**: macOS `36165248598` (failed at 10m in `Build Rabbit`; warm caches skipped all dep builds — libMesh+WASP+config previously proven green).
+- **Root cause**: MOOSE `configure.ac` defines `HAVE_LIBPNG` whenever `pkg-config --exists libpng` succeeds, recording only the `-I` flags it is given. On `macos-15` runners that check succeeds but the flags point nowhere with `png.h` (headers absent), so the guarded `#include <png.h>` in `PNGOutput.h` fails deep in the framework compile. Proven fresh (not stale cache): this run's `Configure MOOSE` re-ran after a cache miss.
+- **Fix, two parts**: (1) `brew install libpng` in the macOS workflow so detection finds real headers (keeps PNG feature parity with Linux instead of disabling it); (2) `check_libpng_consistency()` in `darwin.py::configure_moose` which raises with the exact cause when `-I` dirs lack `png.h`, warns when undecidable, and passes through when consistent. Part (2) matters structurally: it touches `darwin.py`, which is in every mac dep-cache key, so the stale `MooseConfig.h` (old `HAVE_LIBPNG=1`) is invalidated — a workflow-only change would have been silently ignored via cache hit. Also added the missing `moose_deps.txt` to all mac dep/wheel keys (consistency gap vs Linux/Windows).
+- **Files changed**: `.github/workflows/macos_build_and_test.yml`, `scripts/build/darwin.py`, `test/test_darwin.py`.
+- **Verification**: 4 new unit tests (absent/disabled, present+headers, present-without-headers raises) with mocked pkg-config; `pytest` → 18 passed; YAML parses.
+- **Remaining uncertainty**: which formula currently provides the broken `.pc` (irrelevant post-fix — consistent installs pass, anything else fails loudly).
+
 ## 2026-09-25 — macOS: tinyhttp missing `#include <algorithm>`/`<functional>`
 
 - **CI run**: macOS `36165248598` (failed at 10m in `Build Rabbit` — fast because warm caches skipped all dep builds; notably libMesh+WASP+config all green on mac for the first time).

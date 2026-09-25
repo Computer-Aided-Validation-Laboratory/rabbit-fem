@@ -90,6 +90,74 @@ def test_libmesh_skipped_when_already_built(
     assert commands2 == []
 
 
+class _FakePkgConfig:
+    """Minimal pkg-config stand-in for libpng consistency checks."""
+
+    def __init__(
+        self,
+        exists_code: int = 1,
+        cflags: str = "",
+        path: str = "/fake/bin/pkg-config",
+    ) -> None:
+        self.exists_code = exists_code
+        self.cflags = cflags
+        self.path = path
+        self.calls: list[list[str]] = []
+
+    def which(self, name: str, path: object = None) -> str | None:
+        assert name == "pkg-config"
+        return self.path
+
+    def run(
+        self, cmd: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        self.calls.append(cmd)
+        if "--exists" in cmd:
+            return subprocess.CompletedProcess(cmd, self.exists_code)
+        return subprocess.CompletedProcess(cmd, 0, self.cflags)
+
+
+def _patch_pkg_config(
+    monkeypatch: pytest.MonkeyPatch, fake: _FakePkgConfig
+) -> None:
+    monkeypatch.setattr(shutil, "which", fake.which)
+    monkeypatch.setattr(subprocess, "run", fake.run)
+
+
+def test_libpng_absent_disables_quietly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No libpng metadata means MOOSE configures without PNG: no error."""
+    fake = _FakePkgConfig(exists_code=1)
+    _patch_pkg_config(monkeypatch, fake)
+    darwin.check_libpng_consistency({"PATH": "/fake/bin"})
+    assert any("--exists" in c for c in fake.calls)
+
+
+def test_libpng_with_headers_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Consistent libpng install (headers where flags point) passes."""
+    inc = tmp_path / "include"
+    inc.mkdir()
+    (inc / "png.h").write_bytes(b"fake")
+    fake = _FakePkgConfig(exists_code=0, cflags=f"-I{inc}")
+    _patch_pkg_config(monkeypatch, fake)
+    darwin.check_libpng_consistency({"PATH": "/fake/bin"})
+
+
+def test_libpng_without_headers_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Metadata without headers (the CI failure) must fail loudly."""
+    inc = tmp_path / "include"
+    inc.mkdir()
+    fake = _FakePkgConfig(exists_code=0, cflags=f"-I{inc}")
+    _patch_pkg_config(monkeypatch, fake)
+    with pytest.raises(RuntimeError, match="png.h"):
+        darwin.check_libpng_consistency({"PATH": "/fake/bin"})
+
+
 @pytest.mark.skipif(
     shutil.which("patch") is None, reason="patch utility not available"
 )

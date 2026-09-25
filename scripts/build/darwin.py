@@ -261,6 +261,53 @@ def build_wasp(
         print("[OK] WASP parser already built.")
 
 
+def check_libpng_consistency(tool_env: dict[str, str]) -> None:
+    """Fail early if pkg-config reports libpng without usable headers.
+
+    MOOSE configure enables PNG support whenever `pkg-config --exists
+    libpng` succeeds, but only records the -I flags it is given. A
+    library-metadata-only install (no png.h anywhere it points) then
+    surfaces as confusing 'png.h file not found' errors deep in the
+    framework build, so validate up front instead.
+    """
+    pkg_config = shutil.which("pkg-config", path=tool_env.get("PATH"))
+    if pkg_config is None:
+        print("WARNING: pkg-config not found; MOOSE will build without PNG.")
+        return
+    exists = subprocess.run(
+        [pkg_config, "--exists", "libpng"],
+        env=tool_env,
+        capture_output=True,
+    )
+    if exists.returncode != 0:
+        print("MOOSE will build without libpng support.")
+        return
+    res = subprocess.run(
+        [pkg_config, "--cflags-only-I", "libpng"],
+        env=tool_env,
+        capture_output=True,
+        text=True,
+    )
+    include_dirs = [
+        token[2:]
+        for token in res.stdout.split()
+        if token.startswith("-I")
+    ]
+    if not include_dirs:
+        print(
+            "WARNING: pkg-config reports libpng without -I flags; "
+            "png.h must come from default search paths."
+        )
+        return
+    if not any((Path(d) / "png.h").is_file() for d in include_dirs):
+        raise RuntimeError(
+            "pkg-config reports libpng but none of its include dirs "
+            f"contains png.h: {include_dirs}. Install full libpng dev "
+            "files (e.g. `brew install libpng`) so MOOSE configure "
+            "detects a consistent library."
+        )
+
+
 def configure_moose(
     repo_dir: Path,
     moose_dir: Path,
@@ -275,6 +322,7 @@ def configure_moose(
     if not moose_cfg.is_file():
         print("--> Configuring MOOSE...")
         tool_env = get_darwin_tool_env(zigcc_path, zigcxx_path)
+        check_libpng_consistency(tool_env)
         subprocess.run(
             ["./configure", "--with-derivative-size=89"],
             cwd=str(moose_dir),
