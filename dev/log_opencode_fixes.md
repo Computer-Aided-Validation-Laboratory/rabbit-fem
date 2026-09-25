@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: Rabbit step patched before framework sources existed (ordering)
+
+- **CI run**: macOS `36176068156` (failed at 11m in `Build Rabbit`, `tinyhttp/http.h: no member named 'transform' / no template named 'function'`) — all dep stages cache-hit and skipped. Same lean-header symptom as the earlier tinyhttp round, but the patch existed this time.
+- **Root cause**: ordering bug, proven from the runner log. `build_rabbit.py::main()` called `apply_macos_patches()` *before* `build_rabbit_binary()` → `ensure_moose_repo()`. On cache-hit runs the framework tree is absent at patch time (no cache provides `moose/framework`), so every `work_dir.is_dir()` guard silently `continue`d; then `ensure_moose_repo` temp-cloned pristine MOOSE and overlaid the framework (`Initialized empty Git repository in .moose_framework_tmp`, `HEAD is now at 975c9a1c`), guaranteeing unpatched sources at compile time. Full-rebuild runs survived only because stage functions ensure-then-patch in the right order. The silent skip violated fail-early/informative behavior.
+- **Fix**: new `prepare_darwin_rabbit_sources()` in `scripts/build/darwin.py` (ensure-then-patch in one named place; the later ensure inside `build_rabbit_binary` becomes a no-op), called from `build_rabbit.py::main()` behind the existing `darwin` gate. Plus `apply_macos_patches` now prints an explicit `WARNING: skipping <patch>: source dir ... not present` when a patch file exists but its tree is absent (stays a skip — dep stages legitimately run with only some trees materialized — but no longer silent).
+- **Platform considerations**: macOS-only files (`scripts/build/darwin.py`, darwin-gated call in `build_rabbit.py`); Linux/Windows flows byte-identical (`ensure_moose_repo` itself is untouched cross-platform code).
+- **Files changed**: `scripts/build/darwin.py`, `build_rabbit.py`, `test/test_darwin.py` (2 new tests).
+- **Verification**: `test_patch_skip_warns_when_source_absent` (absent trees warn loudly, no raise); `test_prepare_ensures_sources_before_patching` (mocked ensure materializes a pristine `http.h`, helper patches it — proves materialize-before-patch ordering); full unit file → 24 passed via repo `.venv`.
+- **Remaining uncertainty**: none on mechanism. Whether further lean-header TUs hide behind tinyhttp in the framework unity build is the same known loop — next CI round tells.
+
 ## 2026-09-25 — macOS: relocatability test shelled to Linux-only `readelf`
 
 - **CI run**: macOS `36169255744` (failed at 12m in `Run test suite`, `9 passed, 1 failed`) — the actual product is green on mac: `rabbit-opt` linked, 40 libs staged, wheel built (45 MB), and all 9 sim tests passed.

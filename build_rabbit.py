@@ -277,10 +277,14 @@ def main() -> None:
 
     # macOS headers need portability patches before any compile (the
     # framework build below includes third-party headers directly).
+    # Materialize sources first: on cache-hit runs the dep stages are
+    # skipped, so the framework tree may not exist yet (or be overlaid
+    # pristine by ensure inside the build step). Patching such a tree
+    # silently patches nothing.
     if sys.platform == "darwin":
-        from scripts.build.darwin import apply_macos_patches
+        from scripts.build.darwin import prepare_darwin_rabbit_sources
 
-        apply_macos_patches(moose_dir, repo_dir)
+        prepare_darwin_rabbit_sources(repo_dir, moose_dir)
 
     # 2. Discrete dependency stages
     if args.build_petsc:

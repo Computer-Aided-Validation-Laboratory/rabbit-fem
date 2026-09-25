@@ -386,3 +386,84 @@ def test_tinyhttp_patch_applies_to_pristine_tree(tmp_path: Path) -> None:
 
     darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
     assert (target / "http.h").read_text(encoding="utf-8") == patched
+
+
+def test_patch_skip_warns_when_source_absent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Skipped patches (source tree absent) must be loud, not silent.
+
+    Regression guard for the CI failure where the Rabbit step patched
+    before the framework tree was materialized: every patch skipped
+    silently, and the build died later with 'no member named
+    transform' deep in the tinyhttp compile.
+    """
+    repo_dir = tmp_path / "repo"
+    (repo_dir / "patches" / "macos").mkdir(parents=True)
+    for patch in (
+        REAL_PATCH,
+        REAL_LIBMESH_PATCH,
+        REAL_WASP_PATCH,
+        REAL_TINYHTTP_PATCH,
+    ):
+        shutil.copy(patch, repo_dir / "patches" / "macos" / patch.name)
+
+    darwin.apply_macos_patches(tmp_path / "moose", repo_dir)
+
+    out = capsys.readouterr().out
+    for patch in (
+        "poly2tri.patch",
+        "libmesh.patch",
+        "wasp.patch",
+        "tinyhttp.patch",
+    ):
+        assert patch in out
+        assert "WARNING" in out
+
+
+@pytest.mark.skipif(
+    shutil.which("patch") is None, reason="patch utility not available"
+)
+def test_prepare_ensures_sources_before_patching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """prepare_darwin_rabbit_sources must materialize before patching."""
+    calls: list[str] = []
+
+    def fake_ensure(repo_dir: Path, moose_dir: Path) -> None:
+        calls.append("ensure")
+        target = (
+            moose_dir / "framework" / "contrib" / "tinyhttp"
+            / "include" / "tinyhttp"
+        )
+        target.mkdir(parents=True)
+        shutil.copy(
+            REPO_ROOT
+            / "moose"
+            / "framework"
+            / "contrib"
+            / "tinyhttp"
+            / "include"
+            / "tinyhttp"
+            / "http.h",
+            target / "http.h",
+        )
+
+    monkeypatch.setattr(darwin, "ensure_moose_repo", fake_ensure)
+
+    repo_dir = tmp_path / "repo"
+    (repo_dir / "patches" / "macos").mkdir(parents=True)
+    shutil.copy(
+        REAL_TINYHTTP_PATCH,
+        repo_dir / "patches" / "macos" / REAL_TINYHTTP_PATCH.name,
+    )
+
+    darwin.prepare_darwin_rabbit_sources(repo_dir, tmp_path / "moose")
+
+    assert calls == ["ensure"]
+    patched = (
+        tmp_path / "moose" / "framework" / "contrib" / "tinyhttp"
+        / "include" / "tinyhttp" / "http.h"
+    ).read_text(encoding="utf-8")
+    assert "#include <algorithm>" in patched
+    assert "#include <functional>" in patched

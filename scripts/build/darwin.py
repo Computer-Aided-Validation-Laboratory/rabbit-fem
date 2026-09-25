@@ -182,7 +182,17 @@ def apply_macos_patches(moose_dir: Path, repo_dir: Path) -> None:
     }
     for patch_name, work_dir in patches.items():
         patch_file = repo_dir / "patches" / "macos" / patch_name
-        if not patch_file.is_file() or not work_dir.is_dir():
+        if not patch_file.is_file():
+            continue
+        if not work_dir.is_dir():
+            # The corresponding source tree is not materialized in this
+            # flow (e.g. a dep stage that was cache-skipped). Say so
+            # loudly: silently patching nothing here surfaces later as
+            # confusing compile errors deep in the framework build.
+            print(
+                f"WARNING: skipping {patch_name}: "
+                f"source dir {work_dir} not present."
+            )
             continue
         res = subprocess.run(
             ["patch", "-p1", "-N", "-r", "-", "-i", str(patch_file)],
@@ -194,6 +204,22 @@ def apply_macos_patches(moose_dir: Path, repo_dir: Path) -> None:
             raise RuntimeError(
                 f"Applying {patch_name} failed:\n{res.stdout}\n{res.stderr}"
             )
+
+
+def prepare_darwin_rabbit_sources(
+    repo_dir: Path, moose_dir: Path
+) -> None:
+    """Materialize the MOOSE framework, then apply macOS patches.
+
+    The Rabbit build compiles framework sources directly (e.g.
+    framework/contrib/tinyhttp headers), but on cache-hit CI runs the
+    dependency stages -- which ensure sources and patch -- are skipped.
+    Patching before ensure_moose_repo materializes (or overlays pristine)
+    framework sources silently patches nothing, so ensure first here;
+    build_rabbit_binary's own ensure is then a no-op.
+    """
+    ensure_moose_repo(repo_dir, moose_dir)
+    apply_macos_patches(moose_dir, repo_dir)
 
 
 def build_libmesh(
