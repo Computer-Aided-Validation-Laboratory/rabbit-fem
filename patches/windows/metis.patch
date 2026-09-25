@@ -1,0 +1,48 @@
+diff --git a/GKlib.h b/GKlib.h
+index 492c90f2e8..1279f47d72 100644
+--- a/GKlib.h
++++ b/GKlib.h
+@@ -45,7 +45,7 @@
+ #if defined(__WITHPCRE__)
+   #include <pcreposix.h>
+ #else
+-  #if defined(USE_GKREGEX)
++  #if defined(USE_GKREGEX) || defined(_WIN32) || defined(__MINGW32__)
+     #include "gkregex.h"
+   #else
+     #include <regex.h>
+diff --git a/gk_arch.h b/gk_arch.h
+index 2cb80ccf24..49d591d99e 100644
+--- a/gk_arch.h
++++ b/gk_arch.h
+@@ -41,7 +41,9 @@
+ #endif
+   #include <inttypes.h>
+   #include <sys/types.h>
++#if !defined(_WIN32) && !defined(__MINGW32__)
+   #include <sys/resource.h>
++#endif
+   #include <sys/time.h>
+ #endif
+ 
+diff --git a/gk_getopt.h b/gk_getopt.h
+index 4bb86115f9..597c0802a2 100644
+--- a/gk_getopt.h
++++ b/gk_getopt.h
+@@ -52,11 +52,11 @@ struct gk_option {
+ 
+ 
+ /* Function prototypes */
+-extern int gk_getopt(int __argc, char **__argv, char *__shortopts);
+-extern int gk_getopt_long(int __argc, char **__argv, char *__shortopts,
+-              struct gk_option *__longopts, int *__longind);
+-extern int gk_getopt_long_only (int __argc, char **__argv,
+-              char *__shortopts, struct gk_option *__longopts, int *__longind);
++extern int gk_getopt(int argc, char **argv, char *shortopts);
++extern int gk_getopt_long(int argc, char **argv, char *shortopts,
++              struct gk_option *longopts, int *longind);
++extern int gk_getopt_long_only (int argc, char **argv,
++              char *shortopts, struct gk_option *longopts, int *longind);
+ 
+ 
+ 

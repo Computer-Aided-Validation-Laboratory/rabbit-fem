@@ -43,7 +43,7 @@ zig-out/
 *.csv
 !src/rabbit/sims/**/*.csv
 *~
-
+*.msh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -52,7 +52,8 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-build/
+/build/
+!scripts/build/
 develop-eggs/
 dist/
 downloads/

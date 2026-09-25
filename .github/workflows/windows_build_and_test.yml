@@ -7,10 +7,17 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
 jobs:
   windows-build-and-test:
     name: "Windows: Build Wheel and Test"
     runs-on: windows-latest
+    timeout-minutes: 240
 
     steps:
       - name: "Windows: Configure git long paths"
@@ -20,11 +27,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: "Windows: Set up MSYS2"
         uses: msys2/setup-msys2@v2
         with:
           msys2-location: 'C:\msys64'
+          msystem: MSYS
           path-type: inherit
           update: false
           install: >-
@@ -33,6 +42,8 @@ jobs:
             patch
             python
             m4
+            git
+            cmake
 
       - name: "Windows: Set up uv"
         uses: astral-sh/setup-uv@v5
@@ -45,28 +56,137 @@ jobs:
           uv python install 3.13
           uv venv .venv
 
-      - name: "Windows: Cache MOOSE and dependency builds"
-        uses: actions/cache@v4
-        id: moose-windows-cache
+      # --- Top-Level Fast Path: Wheel Cache ---
+      - name: "Windows: Restore wheel cache"
+        uses: actions/cache/restore@v4
+        id: wheel-windows-cache
         with:
           path: |
-            moose/petsc/arch-windows-opt
-            moose/libmesh/installed
+            dist
+            src/rabbit/bin
+          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
+
+      # --- Stage 1: PETSc Dependency ---
+      - name: "Windows: Restore PETSc cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: petsc-windows-cache
+        with:
+          path: moose/petsc/arch-windows-opt
+          key: windows-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          restore-keys: |
+            windows-petsc-
+
+      - name: "Windows: Build PETSc"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.petsc-windows-cache.outputs.cache-hit != 'true'
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage petsc
+
+      - name: "Windows: Save PETSc cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.petsc-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: moose/petsc/arch-windows-opt
+          key: windows-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+
+      # --- Stage 2: libMesh Dependency ---
+      - name: "Windows: Restore libMesh cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: libmesh-windows-cache
+        with:
+          path: moose/libmesh/installed
+          key: windows-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          restore-keys: |
+            windows-libmesh-
+
+      - name: "Windows: Build libMesh"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.libmesh-windows-cache.outputs.cache-hit != 'true'
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage libmesh
+
+      - name: "Windows: Save libMesh cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.libmesh-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: moose/libmesh/installed
+          key: windows-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+
+      # --- Stage 3: WASP and HIT Dependency ---
+      - name: "Windows: Restore WASP cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: wasp-windows-cache
+        with:
+          path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
-            moose/framework/include/base/MooseConfig.h
-          key: windows-moose-build-${{ hashFiles('moose/petsc/**', 'moose/libmesh/**') }}
+          key: windows-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
           restore-keys: |
-            windows-moose-build-
+            windows-wasp-
 
-      - name: "Windows: Build MOOSE dependencies and Rabbit"
+      - name: "Windows: Build WASP and HIT"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.wasp-windows-cache.outputs.cache-hit != 'true'
         run: |
-          powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1
+          powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage wasp
 
-      - name: "Windows: Package standalone wheel and run tests"
+      - name: "Windows: Save WASP cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.wasp-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            moose/framework/contrib/wasp/install
+            moose/framework/contrib/wasp/build
+            moose/framework/contrib/hit/hit.exe
+          key: windows-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+
+      # --- Stage 4: MOOSE Framework Configuration ---
+      - name: "Windows: Restore MOOSE Config cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mooseconfig-windows-cache
+        with:
+          path: moose/framework/include/base/MooseConfig.h
+          key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+          restore-keys: |
+            windows-mooseconfig-
+
+      - name: "Windows: Configure MOOSE"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.mooseconfig-windows-cache.outputs.cache-hit != 'true'
         run: |
-          uv run python build_rabbit.py --wheel-only --test
+          powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage moose
+
+      - name: "Windows: Save MOOSE Config cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.mooseconfig-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: moose/framework/include/base/MooseConfig.h
+          key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+
+      # --- Stage 5: Build Rabbit Application and Wheel ---
+      - name: "Windows: Build Rabbit application"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage rabbit
+
+      - name: "Windows: Package standalone wheel"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --wheel-only
+
+      - name: "Windows: Run test suite"
+        run: |
+          uv run python build_rabbit.py --test
+
+      - name: "Windows: Save wheel cache"
+        if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+          key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
 
       - name: "Windows: Upload wheel artifact"
         uses: actions/upload-artifact@v4
@@ -74,3 +194,60 @@ jobs:
           name: rabbit-fem-windows-wheel
           path: dist/*.whl
           if-no-files-found: error
+
+      - name: "Windows: Upload build failure logs"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-failure-logs
+          path: |
+            current_step.log
+            make.log
+            last_step.log
+            paste_url.txt
+            moose/petsc/arch-windows-opt/lib/petsc/conf/configure.log
+          if-no-files-found: ignore
+
+      - name: "Windows: Post failure comment"
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $logPath = $null
+          if (Test-Path "current_step.log") { $logPath = "current_step.log" }
+          elseif (Test-Path "last_step.log") { $logPath = "last_step.log" }
+          elseif (Test-Path "make.log") { $logPath = "make.log" }
+          else {
+            $found = Get-ChildItem -Path . -Filter "*step*.log" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $logPath = $found.FullName }
+          }
+
+          Write-Host "================ FAILURE LOG TAIL ================" -ForegroundColor Red
+          if ($logPath -and (Test-Path $logPath)) {
+            Get-Content $logPath -Tail 150 | ForEach-Object { Write-Host $_ }
+          } else {
+            Write-Host "No step log found."
+          }
+          Write-Host "==================================================" -ForegroundColor Red
+
+          $pasteUrl = if (Test-Path "paste_url.txt") { (Get-Content "paste_url.txt" -Raw).Trim() } else { $null }
+          if (-not $pasteUrl -and $logPath) {
+            try {
+              $pasteUrl = (Invoke-RestMethod -Uri "https://paste.rs" -Method Post -InFile $logPath -TimeoutSec 10).Trim()
+            } catch {}
+          }
+          $tail = if ($logPath) { (Get-Content $logPath -Tail 100) -join "`n" } else { "No step log available." }
+          $tailClean = $tail -replace "`e\[[0-9;]*[a-zA-Z]", "" -replace "[\x00-\x08\x0B\x0C\x0E-\x1F]", ""
+          $pasteInfo = if ($pasteUrl) { "**Full Failure Log:** $pasteUrl`n`n" } else { "" }
+          $commentBody = "### ❌ Windows Build Failure on commit ${{ github.sha }}`n`n${pasteInfo}``````text`n$tailClean`n```````n"
+          [System.IO.File]::WriteAllText("comment.txt", $commentBody, [System.Text.Encoding]::UTF8)
+
+          if ($env:GITHUB_STEP_SUMMARY) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $commentBody
+          }
+
+          try {
+            gh pr comment 1 -R ${{ github.repository }} --body-file comment.txt
+          } catch {
+            Write-Host "PR comment failed: $_"
+          }

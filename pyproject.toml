@@ -14,7 +14,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rabbit-fem"
-version = "2026.9.0"
+version = "2026.9.3"
 description = "A lightweight MOOSE distribution packaging thermal and solid mechanics"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -38,10 +38,10 @@ rabbit = "rabbit.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rabbit"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/rabbit/bin" = "rabbit/bin"
-"src/rabbit/lib" = "rabbit/lib"
+artifacts = [
+    "src/rabbit/bin/*",
+    "src/rabbit/lib/*",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [

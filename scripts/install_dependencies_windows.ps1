@@ -6,12 +6,14 @@
 # ------------------------------------------------------------------------------
 
 param(
-    [int]$Jobs = 8,
+    [string]$Stage = "all",
+    [int]$Jobs = 4,
     [string]$Method = "opt",
     [switch]$SkipTests
 )
 
 $ErrorActionPreference = "Stop"
+$env:MSYS2_PATH_TYPE = "inherit"
 $RepoRoot = (Get-Item $PSScriptRoot).Parent.FullName
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host " Rabbit-FEM Windows Native Build Toolchain" -ForegroundColor Cyan
@@ -20,12 +22,58 @@ Write-Host " Parallel Jobs:   $Jobs" -ForegroundColor Cyan
 Write-Host " Build Method:    $Method" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
-# 1. Check MSYS2
-$MsysBash = "C:\msys64\usr\bin\bash.exe"
-if (-not (Test-Path $MsysBash)) {
-    throw "MSYS2 bash not found at $MsysBash. Please install MSYS2 to C:\msys64."
+# 1. Detect MSYS2 installation dynamically
+$MsysRoot = $null
+if ($env:MSYS2_ROOT -and (Test-Path (Join-Path $env:MSYS2_ROOT "usr\bin\bash.exe"))) {
+    $MsysRoot = $env:MSYS2_ROOT
+} elseif ($env:MSYS_ROOT -and (Test-Path (Join-Path $env:MSYS_ROOT "usr\bin\bash.exe"))) {
+    $MsysRoot = $env:MSYS_ROOT
+} else {
+    $candidates = @("C:\msys64", "D:\msys64", "C:\tools\msys64", "D:\tools\msys64", (Join-Path $env:LOCALAPPDATA "msys64"))
+    foreach ($cand in $candidates) {
+        if ($cand -and (Test-Path (Join-Path $cand "usr\bin\bash.exe"))) {
+            $MsysRoot = $cand
+            break
+        }
+    }
 }
+if (-not $MsysRoot) {
+    $bashCmd = Get-Command bash.exe -ErrorAction SilentlyContinue
+    if ($bashCmd -and $bashCmd.Source -like "*msys*") {
+        $MsysRoot = (Get-Item $bashCmd.Source).Directory.Parent.Parent.FullName
+    }
+}
+if (-not $MsysRoot) {
+    throw "MSYS2 not found. Please install MSYS2 to C:\msys64 or set `$env:MSYS2_ROOT."
+}
+$MsysBash = Join-Path $MsysRoot "usr\bin\bash.exe"
+$env:MSYS2_ROOT = $MsysRoot
 Write-Host "[OK] MSYS2 found at $MsysBash" -ForegroundColor Green
+
+$requiredMsysTools = @("diff.exe", "make.exe", "patch.exe", "m4.exe", "git.exe", "python3.exe", "cmake.exe")
+$needsInstall = $false
+foreach ($tool in $requiredMsysTools) {
+    if (-not (Test-Path (Join-Path $MsysRoot "usr\bin\$tool"))) {
+        $needsInstall = $true
+        break
+    }
+}
+if ($needsInstall) {
+    Write-Host "[*] Synchronizing MSYS2 database and installing required packages..." -ForegroundColor Yellow
+    & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/python-pip msys/cmake
+}
+# MSYS python modules required by MOOSE/PETSc configure scripts (premake.py,
+# versioner.py, PETSc configure). These must be ensured on every run: a cached
+# MSYS2 image provides the tools above but not necessarily the pip modules,
+# and `make` invokes /usr/bin/python3 rather than the .venv interpreter.
+Write-Host "[*] Ensuring MSYS python modules (packaging, pyyaml, jinja2)..." -ForegroundColor Yellow
+& (Join-Path $MsysRoot "usr\bin\python3.exe") -m pip install --break-system-packages --quiet packaging pyyaml jinja2
+foreach ($tool in $requiredMsysTools) {
+    if (-not (Test-Path (Join-Path $MsysRoot "usr\bin\$tool"))) {
+        throw "Failed to install required MSYS2 tool $tool in $MsysRoot\usr\bin."
+    }
+}
+Write-Host "[OK] MSYS2 required tools verified (diff, make, patch, m4, git, python3, cmake)." -ForegroundColor Green
 
 # 2. Check or create Python virtual environment with uv
 $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
@@ -37,7 +85,7 @@ Write-Host "[OK] Python environment: $VenvPython" -ForegroundColor Green
 
 # 3. Install required Python packages
 Write-Host "[*] Installing Python build and test dependencies..." -ForegroundColor Yellow
-& uv pip install --python $VenvPython ziglang packaging pyyaml jinja2 pytest gmsh
+& uv pip install --python $VenvPython ziglang packaging pyyaml jinja2 pytest gmsh wheel
 Write-Host "[OK] Python dependencies installed." -ForegroundColor Green
 
 # 4. Check Zig compiler
@@ -57,12 +105,17 @@ $WrappersDir = Join-Path $RepoRoot ".zig_wrappers"
 if (-not (Test-Path $WrappersDir)) {
     New-Item -ItemType Directory -Force -Path $WrappersDir | Out-Null
 }
+$srcWrappersDir = Join-Path $RepoRoot "scripts\windows_wrappers"
+if (Test-Path $srcWrappersDir) {
+    Copy-Item (Join-Path $srcWrappersDir "*.py") $WrappersDir -Force
+}
 $pyWinPath = $VenvPython.Replace('\', '/')
 $wrappers = @(
     @{ Name = "zig-cc"; Script = "cc_wrapper.py" },
     @{ Name = "zig-cxx"; Script = "cxx_wrapper.py" },
     @{ Name = "zig-ar"; Script = "ar_wrapper.py" },
-    @{ Name = "zig-ranlib"; Script = "ranlib_wrapper.py" }
+    @{ Name = "zig-ranlib"; Script = "ranlib_wrapper.py" },
+    @{ Name = "lib"; Script = "ar_wrapper.py" }
 )
 foreach ($w in $wrappers) {
     $shPath = Join-Path $WrappersDir $w.Name
@@ -78,73 +131,334 @@ Write-Host "[OK] Compiler wrappers configured in $WrappersDir" -ForegroundColor 
 # Helper function to run bash commands
 function Invoke-MsysBash([string]$BashCommand, [string]$StepTitle) {
     Write-Host "`n>>> $StepTitle..." -ForegroundColor Cyan
-    $setupCmd = "export PATH=`"$RepoRootPosix/.venv/Scripts:/usr/bin:`$PATH`" && cd `"$RepoRootPosix`" && "
-    $combined = $setupCmd + $BashCommand
-    & $MsysBash -lc $combined
-    if ($LASTEXITCODE -ne 0) {
-        throw "$StepTitle failed with exit code $LASTEXITCODE."
+    $localLog = Join-Path $RepoRoot "current_step.log"
+    $lastLog = Join-Path $RepoRoot "last_step.log"
+    if (Test-Path $localLog) { Remove-Item -Force $localLog }
+
+    $stepScript = Join-Path $RepoRoot "run_step.sh"
+    $stepScriptPosix = "$RepoRootPosix/run_step.sh"
+
+    $lines = @(
+        "set -euo pipefail",
+        "export PATH=`"$RepoRootPosix/.zig_wrappers:/usr/bin:$RepoRootPosix/.venv/Scripts:`$PATH`"",
+        "cd `"$RepoRootPosix`"",
+        $BashCommand
+    )
+    $content = ($lines -join "`n") + "`n"
+    [System.IO.File]::WriteAllText($stepScript, $content, (New-Object System.Text.UTF8Encoding($false)))
+
+    $cmd = "set -o pipefail && ( source `"$stepScriptPosix`" ) 2>&1 | tee `"$RepoRootPosix/current_step.log`""
+    & $MsysBash -lc $cmd
+    $code = $LASTEXITCODE
+
+    if (Test-Path $localLog) {
+        Copy-Item $localLog $lastLog -Force
+    }
+
+    if ($code -ne 0) {
+        Write-Host "`n[!] $StepTitle FAILED with exit code $code" -ForegroundColor Red
+        $possibleLogs = @(
+            (Join-Path $RepoRoot "moose\petsc\configure.log"),
+            (Join-Path $RepoRoot "moose\petsc\arch-windows-opt\lib\petsc\conf\configure.log")
+        )
+        foreach ($petscLog in $possibleLogs) {
+            if (Test-Path $petscLog) {
+                "`n--- PETSC CONFIGURE.LOG TAIL ---`n" | Out-File -FilePath $localLog -Append -Encoding utf8
+                Get-Content $petscLog -Tail 150 | Out-File -FilePath $localLog -Append -Encoding utf8
+                break
+            }
+        }
+        if (Test-Path $localLog) {
+            $tail = Get-Content $localLog -Tail 100
+            Write-Host "`n--- LAST 100 LINES OF $StepTitle LOG ---" -ForegroundColor Red
+            $tail | ForEach-Object { Write-Host $_ }
+            Write-Host "--- END OF LOG ---`n" -ForegroundColor Red
+            try {
+                $pasteUrl = (Invoke-RestMethod -Uri "https://paste.rs" -Method Post -InFile $localLog -TimeoutSec 10).Trim()
+                Write-Host "[*] Build failure log uploaded to: $pasteUrl" -ForegroundColor Yellow
+                $pasteUrl | Set-Content (Join-Path $RepoRoot "paste_url.txt")
+            } catch {}
+        }
+        throw "$StepTitle failed with exit code $code."
     }
     Write-Host "[OK] $StepTitle completed successfully." -ForegroundColor Green
 }
 
-# 6. Build PETSc
+# 5.5. Ensure MOOSE repository and submodules
+$MooseDir = Join-Path $RepoRoot "moose"
+$MooseVersionFile = Join-Path $RepoRoot "moose_version.txt"
+$MooseCommit = "975c9a1ca693c21bef850b7beba724e0fb703591"
+if (Test-Path $MooseVersionFile) {
+    $MooseCommit = (Get-Content $MooseVersionFile).Trim()
+}
+$MooseFrameworkMk = Join-Path $MooseDir "framework\build.mk"
+$MoosePetscCfg = Join-Path $RepoRoot "moose\petsc\configure"
+$MooseLibmeshCfg = Join-Path $RepoRoot "moose\libmesh\configure"
 $PetscLib = Join-Path $RepoRoot "moose\petsc\arch-windows-opt\lib\libpetsc.a"
-if (-not (Test-Path $PetscLib)) {
-    $petscConfig = "cd moose/petsc && ./configure PETSC_ARCH=arch-windows-opt --with-cc=$RepoRootPosix/.zig_wrappers/zig-cc --with-cxx=$RepoRootPosix/.zig_wrappers/zig-cxx --with-ar=$RepoRootPosix/.zig_wrappers/zig-ar --with-ranlib=$RepoRootPosix/.zig_wrappers/zig-ranlib --with-fc=0 --with-mpi=0 --with-shared-libraries=0 --with-debugging=0 --download-f2cblaslapack=1 --with-make-np=$Jobs && make PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt all"
-    Invoke-MsysBash $petscConfig "Configuring and building PETSc (arch-windows-opt)"
-} else {
-    Write-Host "[OK] PETSc already built at $PetscLib" -ForegroundColor Green
+$LibMeshLib = Join-Path $RepoRoot "moose\libmesh\installed\lib\libmesh_opt.a"
+$HitExe = Join-Path $RepoRoot "moose\framework\contrib\hit\hit.exe"
+$MooseConfig = Join-Path $RepoRoot "moose\framework\include\base\MooseConfig.h"
+
+$AllDepsBuilt = (Test-Path $PetscLib) -and (Test-Path $LibMeshLib) -and (Test-Path $HitExe) -and (Test-Path $MooseConfig)
+
+if (-not (Test-Path $MooseFrameworkMk)) {
+    Write-Host "[*] Ensuring MOOSE framework files exist (commit $MooseCommit)..." -ForegroundColor Yellow
+    & $VenvPython -c "from scripts.build.common import ensure_moose_repo, get_moose_dir; from pathlib import Path; ensure_moose_repo(Path('.'), get_moose_dir(Path('.')))"
+}
+
+$needPetsc = ($Stage -in @("all", "petsc")) -and -not (Test-Path $PetscLib) -and -not (Test-Path $MoosePetscCfg)
+$needLibmesh = ($Stage -in @("all", "libmesh")) -and -not (Test-Path $LibMeshLib) -and -not (Test-Path (Join-Path $MooseDir "libmesh\installed\include\libmesh\libmesh.h"))
+$needWasp = ($Stage -in @("all", "wasp")) -and -not (Test-Path $HitExe) -and -not (Test-Path (Join-Path $MooseDir "framework\contrib\wasp\CMakeLists.txt"))
+
+# Submodule SOURCES must exist regardless of Stage. Cache-hit runs restore
+# built libs without source trees, so gating init on missing libs (above)
+# leaves hollow trees that fail confusingly downstream (e.g. missing
+# moose/petsc/include/petscsys.h). Gate on sentinel source files instead,
+# mirroring ensure_moose_submodules on Linux.
+$needPetscSources = -not (Test-Path $MoosePetscCfg)
+$needLibmeshSources = -not (Test-Path $MooseLibmeshCfg)
+$needWaspSources = -not (Test-Path (Join-Path $MooseDir "framework\contrib\wasp\CMakeLists.txt"))
+
+$subsNeeded = @()
+if ($needPetsc -or $needPetscSources) { $subsNeeded += "petsc" }
+if ($needLibmesh -or $needLibmeshSources) { $subsNeeded += "libmesh" }
+if ($needWasp -or $needWaspSources) { $subsNeeded += "framework/contrib/wasp" }
+
+# actions/cache restores built libs into hollow submodule dirs, which makes
+# 'git submodule update' refuse to clone ("already exists and is not an
+# empty directory"). Relocate any hollow submodule dir aside so the clone
+# can proceed; preserved outputs are merged back afterwards.
+$submoduleSentinels = @(
+    @{ Sub = "petsc"; Sentinel = "configure" },
+    @{ Sub = "libmesh"; Sentinel = "configure" },
+    @{ Sub = "framework/contrib/wasp"; Sentinel = "CMakeLists.txt" }
+)
+$movedBackups = @()
+foreach ($sp in $submoduleSentinels) {
+    $subDir = Join-Path $MooseDir $sp.Sub
+    $backupDir = "$subDir.__rabbit_backup"
+    if ((Test-Path $subDir) -and -not (Test-Path (Join-Path $subDir $sp.Sentinel))) {
+        if (Test-Path $backupDir) {
+            throw "Stale submodule backup exists at $backupDir (previous run killed?). Remove it or move it back to $subDir and re-run."
+        }
+        Move-Item $subDir $backupDir
+        $movedBackups += @{ Backup = $backupDir; Dest = $subDir }
+    }
+}
+
+if ($subsNeeded.Count -gt 0) {
+    $subsList = $subsNeeded -join " "
+    $submoduleCmd = "cd moose && git config core.autocrlf false && git submodule sync --recursive $subsList && git submodule update --init --recursive $subsList"
+    $maxAttempts = 5
+    $attempt = 1
+    $success = $false
+    while (-not $success -and $attempt -le $maxAttempts) {
+        try {
+            Invoke-MsysBash $submoduleCmd "Initializing MOOSE submodules: $subsList (Attempt $attempt/$maxAttempts)"
+            $success = $true
+        } catch {
+            if ($attempt -ge $maxAttempts) {
+                throw $_
+            }
+            Write-Host "[!] Submodule update failed (transient remote/load error). Waiting 30s before retry..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 30
+            $attempt++
+        }
+    }
+}
+
+# Merge preserved build outputs back into the freshly cloned submodules.
+# (On exhausted retries the throw above skips this; the missing-sources
+# check below then fails with the exact paths.)
+foreach ($mb in $movedBackups) {
+    if (-not (Test-Path $mb.Backup)) { continue }
+    if (-not (Test-Path $mb.Dest)) {
+        Move-Item $mb.Backup $mb.Dest
+        continue
+    }
+    Get-ChildItem -Force $mb.Backup | ForEach-Object {
+        $target = Join-Path $mb.Dest $_.Name
+        if (Test-Path $target) {
+            Write-Host "[!] Preserved output collides with fresh clone, keeping fresh: $($_.Name)" -ForegroundColor Yellow
+        } else {
+            Move-Item $_.FullName $target
+        }
+    }
+    if (@(Get-ChildItem -Force $mb.Backup).Count -eq 0) { Remove-Item $mb.Backup }
+    else { Write-Host "[!] Backup not empty after merge, leaving: $($mb.Backup)" -ForegroundColor Yellow }
+}
+
+# Fail early if submodule sources are still missing (e.g. offline runners).
+$missingSources = @()
+if (-not (Test-Path $MoosePetscCfg)) { $missingSources += "moose/petsc/configure" }
+if (-not (Test-Path $MooseLibmeshCfg)) { $missingSources += "moose/libmesh/configure" }
+if (-not (Test-Path (Join-Path $MooseDir "framework\contrib\wasp\CMakeLists.txt"))) { $missingSources += "moose/framework/contrib/wasp/CMakeLists.txt" }
+if ($missingSources.Count -gt 0) {
+    throw "MOOSE submodule sources missing: $($missingSources -join ', '). Ensure network access so 'git submodule update --init --recursive' can materialize them."
+}
+
+# Fail early if materialized submodules drift from moose_deps.txt.
+# (Absent checkouts are skipped here; the stage blocks materialize them.)
+& $VenvPython -c "from scripts.build.common import verify_moose_deps, get_moose_dir; from pathlib import Path; verify_moose_deps(get_moose_dir(Path('.')), Path('.'))"
+if ($LASTEXITCODE -ne 0) { throw "MOOSE dependency pins do not match moose_deps.txt (see error above)." }
+
+# 5.6. Ensure Windows source patches (unconditional).
+# CI restores built libs via actions/cache and then invokes `-Stage rabbit`
+# directly, skipping the petsc/libmesh/wasp/moose stages where patches were
+# historically applied. A fresh checkout therefore builds Rabbit against
+# unpatched upstream sources (e.g. unpatched moose.mk rebuilds
+# _pycapabilities.so with MSYS python headers -> sys/select.h failure).
+# Apply all patches here on every invocation so any Stage sees patched
+# sources. `patch -N` returns 1 when hunks are already applied; only exit
+# codes >1 indicate a real failure (no `|| true` error hiding).
+$patchSteps = @(
+    @{ Dir = "moose/petsc"; File = "$RepoRootPosix/patches/windows/petsc.patch"; Title = "Ensuring PETSc Windows patch" },
+    @{ Dir = "moose/libmesh/contrib/netcdf/netcdf-c-4.6.2"; File = "$RepoRootPosix/patches/windows/netcdf.patch"; Title = "Ensuring NetCDF Windows patch" },
+    @{ Dir = "moose/libmesh/contrib/metis/GKlib"; File = "$RepoRootPosix/patches/windows/metis.patch"; Title = "Ensuring METIS Windows patch" },
+    @{ Dir = "moose/framework/contrib/wasp"; File = "$RepoRootPosix/patches/windows/wasp.patch"; Title = "Ensuring WASP Windows patch" },
+    @{ Dir = "moose"; File = "$RepoRootPosix/patches/windows/moose.patch"; Title = "Ensuring MOOSE Windows patch" }
+)
+foreach ($p in $patchSteps) {
+    $patchCmd = "if [ -f `"$($p.File)`" ] && [ -d `"$($p.Dir)`" ]; then cd `"$($p.Dir)`" && set +e; patch -p1 -N -r - < `"$($p.File)`"; code=`$?; set -e; if [ `$code -gt 1 ]; then exit `$code; fi; else echo `"Skipping $($p.Title): source or patch not present yet`"; fi"
+    Invoke-MsysBash $patchCmd $p.Title
+}
+# Fail early if the pycapabilities stub is missing after patching.
+$stubCheck = "if [ -f moose/framework/moose.mk ]; then if ! grep -q 'Skipping pycapabilities on Windows' moose/framework/moose.mk; then echo 'ERROR: MOOSE Windows patch not applied (pycapabilities stub missing in moose/framework/moose.mk)'; exit 1; fi; fi"
+Invoke-MsysBash $stubCheck "Verifying MOOSE Windows patch"
+
+# 6. Build PETSc
+if ($Stage -in @("all", "petsc")) {
+    $PetscLib = Join-Path $RepoRoot "moose\petsc\arch-windows-opt\lib\libpetsc.a"
+    if (-not (Test-Path $PetscLib)) {
+        $applyPetsc = "cd moose/petsc && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/petsc.patch`" || true"
+        Invoke-MsysBash $applyPetsc "Applying PETSc Windows patch"
+
+        $petscConfig = "cd moose/petsc && python3 ./configure PETSC_ARCH=arch-windows-opt --with-cc=$RepoRootPosix/.zig_wrappers/zig-cc --with-cxx=$RepoRootPosix/.zig_wrappers/zig-cxx --with-ar=$RepoRootPosix/.zig_wrappers/zig-ar --with-ranlib=$RepoRootPosix/.zig_wrappers/zig-ranlib --with-fc=0 --with-mpi=0 --with-shared-libraries=0 --with-debugging=0 --download-f2cblaslapack=1 --with-windows-graphics=0 --with-x=0 --with-make-np=$Jobs && make PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt all"
+        Invoke-MsysBash $petscConfig "Configuring and building PETSc (arch-windows-opt)"
+    } else {
+        Write-Host "[OK] PETSc already built at $PetscLib" -ForegroundColor Green
+    }
 }
 
 # 7. Build libMesh
-$LibMeshLib = Join-Path $RepoRoot "moose\libmesh\installed\lib\libmesh_opt.a"
-if (-not (Test-Path $LibMeshLib)) {
-    $libmeshBuild = "cd moose/libmesh && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --without-mpi --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-petsc=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
-    Invoke-MsysBash $libmeshBuild "Configuring and building libMesh"
-} else {
-    Write-Host "[OK] libMesh already built at $LibMeshLib" -ForegroundColor Green
+if ($Stage -in @("all", "libmesh")) {
+    $LibMeshLib = Join-Path $RepoRoot "moose\libmesh\installed\lib\libmesh_opt.a"
+    if (-not (Test-Path $LibMeshLib)) {
+        $fixSymlinks = Join-Path $RepoRoot "moose\libmesh\contrib\bin\fix_windows_symlinks.sh"
+        $robustSymlinkScript = @"
+#!/bin/sh
+set -e
+
+LIBMESH_ROOT=`$(git rev-parse --show-toplevel)
+cd "`$LIBMESH_ROOT"
+
+SYMLINKS=`$(git ls-files -s | grep '^120000' | cut -f2)
+
+for sl in `$SYMLINKS
+do
+    TARGET_REL=`$(git cat-file blob ":`$sl" 2>/dev/null | tr -d '\r\n')
+    if [ -z "`$TARGET_REL" ]; then
+        continue
+    fi
+    TARGET=`$(dirname "`$sl")/"`$TARGET_REL"
+    if [ ! -e "`$TARGET" ]; then
+        echo "Warning: target `$TARGET does not exist for `$sl"
+        continue
+    fi
+    echo "Replacing symlink `$sl by copy of `$TARGET..."
+    rm -rf "`$sl"
+    cp -r "`$TARGET" "`$sl"
+    git update-index --assume-unchanged "`$sl" 2>/dev/null || true
+done
+"@
+        [System.IO.File]::WriteAllText($fixSymlinks, $robustSymlinkScript)
+        Invoke-MsysBash "cd moose/libmesh && ./contrib/bin/fix_windows_symlinks.sh" "Fixing libMesh Windows symlinks"
+
+        # Ensure nested eigen symlink (eigen/eigen -> eigen/gitshim -> ../git/Eigen) is properly resolved
+        $fixEigen = "cd moose/libmesh/contrib && if [ -d eigen/git/Eigen ]; then rm -rf eigen/gitshim/Eigen eigen/gitshim/unsupported eigen/gitshim/root && cp -r eigen/git/Eigen eigen/gitshim/Eigen && cp -r eigen/git/unsupported eigen/gitshim/unsupported && cp -r eigen/git eigen/gitshim/root && rm -rf eigen/eigen && cp -r eigen/gitshim eigen/eigen; fi && test -f eigen/eigen/Eigen/Householder"
+        Invoke-MsysBash $fixEigen "Resolving and verifying Eigen headers for Windows"
+
+        # Apply Windows patches for NetCDF and METIS
+        $applyNetcdf = "cd moose/libmesh/contrib/netcdf/netcdf-c-4.6.2 && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/netcdf.patch`" || true"
+        Invoke-MsysBash $applyNetcdf "Applying NetCDF Windows patch"
+
+        $applyMetis = "cd moose/libmesh/contrib/metis/GKlib && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/metis.patch`" || true"
+        Invoke-MsysBash $applyMetis "Applying METIS Windows patch"
+
+        $libmeshBuild = "cd moose/libmesh && export PETSC_DIR=$RepoRootPosix/moose/petsc && export PETSC_ARCH=arch-windows-opt && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --disable-fortran --disable-exodus-fortran PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
+        Invoke-MsysBash $libmeshBuild "Configuring and building libMesh"
+    } else {
+        Write-Host "[OK] libMesh already built at $LibMeshLib" -ForegroundColor Green
+    }
 }
 
 # 8. Build WASP and HIT
-$HitExe = Join-Path $RepoRoot "moose\framework\contrib\hit\hit.exe"
-if (-not (Test-Path $HitExe)) {
-    $waspBuild = "cd moose/framework/contrib/wasp && mkdir -p build && cd build && cmake -G `"MinGW Makefiles`" -DCMAKE_C_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cc`" -DCMAKE_CXX_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cxx`" -DCMAKE_AR=`"$RepoRootPosix/.zig_wrappers/zig-ar`" -DCMAKE_RANLIB=`"$RepoRootPosix/.zig_wrappers/zig-ranlib`" -DCMAKE_INSTALL_PREFIX=`"$RepoRootPosix/moose/framework/contrib/wasp/install`" -DBUILD_SHARED_LIBS=OFF .. && make -j$Jobs && make install && cd $RepoRootPosix/moose/framework/contrib/hit && make -j$Jobs"
-    Invoke-MsysBash $waspBuild "Building WASP and HIT parser"
-} else {
-    Write-Host "[OK] HIT parser already built at $HitExe" -ForegroundColor Green
+if ($Stage -in @("all", "wasp")) {
+    $HitExe = Join-Path $RepoRoot "moose\framework\contrib\hit\hit.exe"
+    if (-not (Test-Path $HitExe)) {
+        # Apply Windows patch for WASP
+        $applyWasp = "cd moose/framework/contrib/wasp && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/wasp.patch`" || true"
+        Invoke-MsysBash $applyWasp "Applying WASP Windows patch"
+
+        $waspBuild = "cd moose/framework/contrib/wasp && mkdir -p build && cd build && cmake -G `"Unix Makefiles`" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_DEPENDS_USE_COMPILER=FALSE -DCMAKE_C_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cc`" -DCMAKE_CXX_COMPILER=`"$RepoRootPosix/.zig_wrappers/zig-cxx`" -DCMAKE_AR=`"$RepoRootPosix/.zig_wrappers/zig-ar`" -DCMAKE_RANLIB=`"$RepoRootPosix/.zig_wrappers/zig-ranlib`" -DCMAKE_INSTALL_PREFIX=`"$RepoRootPosix/moose/framework/contrib/wasp/install`" -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_CXX_FLAGS=`"-I$RepoRootPosix/moose/framework/contrib/wasp -I$RepoRootPosix/moose/framework/contrib/wasp/build`" -DCMAKE_C_FLAGS=`"-I$RepoRootPosix/moose/framework/contrib/wasp -I$RepoRootPosix/moose/framework/contrib/wasp/build`" -Dwasp_ENABLE_ALL_PACKAGES=OFF -Dwasp_ENABLE_wasphit=ON -Dwasp_ENABLE_wasplsp=ON -Dwasp_ENABLE_waspsiren=ON -Dwasp_ENABLE_waspplot=ON -Dwasp_ENABLE_testframework=OFF -Dwasp_ENABLE_TESTS=OFF -DBUILD_SHARED_LIBS=OFF -DDISABLE_HIT_TYPE_PROMOTION=ON .. && make -j$Jobs && make install && cd $RepoRootPosix/moose/framework/contrib/hit && make -j$Jobs hit CXX=`"$RepoRootPosix/.zig_wrappers/zig-cxx`" WASP_DIR=`"$RepoRootPosix/moose/framework/contrib/wasp/install`" lib_suffix=a && if [ -f hit ] && [ ! -f hit.exe ]; then cp hit hit.exe; fi"
+        Invoke-MsysBash $waspBuild "Building WASP and HIT parser"
+    } else {
+        Write-Host "[OK] HIT parser already built at $HitExe" -ForegroundColor Green
+    }
 }
 
 # 9. Configure MOOSE
-$MooseConfig = Join-Path $RepoRoot "moose\framework\include\base\MooseConfig.h"
-if (-not (Test-Path $MooseConfig)) {
-    $mooseConf = "cd moose/framework && ./configure --with-derivative-size=89"
-    Invoke-MsysBash $mooseConf "Configuring MOOSE framework"
-} else {
-    Write-Host "[OK] MOOSE framework already configured." -ForegroundColor Green
+if ($Stage -in @("all", "moose")) {
+    & $VenvPython "$RepoRoot\scripts\fix_symlinks.py" "$RepoRoot\moose"
+    $applyMoose = "cd moose && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/moose.patch`" || true"
+    Invoke-MsysBash $applyMoose "Applying MOOSE Windows patch"
+
+    if (-not (Test-Path $MooseConfig)) {
+        $mooseConf = "cd moose && ./configure --with-derivative-size=89"
+        Invoke-MsysBash $mooseConf "Configuring MOOSE framework"
+    } else {
+        Write-Host "[OK] MOOSE framework already configured." -ForegroundColor Green
+    }
 }
 
 # 10. Build Rabbit
-$RabbitExe = Join-Path $RepoRoot "rabbit-$Method.exe"
-Write-Host "`n[*] Building Rabbit application (rabbit-$Method.exe)..." -ForegroundColor Yellow
-$rabbitBuild = "cd $RepoRootPosix && make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install"
-Invoke-MsysBash $rabbitBuild "Compiling and linking Rabbit"
+if ($Stage -in @("all", "rabbit")) {
+    $RabbitExe = Join-Path $RepoRoot "rabbit-$Method.exe"
+    Write-Host "`n[*] Building Rabbit application (rabbit-$Method.exe)..." -ForegroundColor Yellow
+    # Read-only preflight: the framework compile resolves all third-party
+    # include flags via libmesh-config. On cache-restored workspaces a stale
+    # libmesh install (e.g. configured without PETSc) surfaces only as
+    # confusing 'petscsys.h file not found' errors deep in the build, so fail
+    # early here with the exact flag values instead.
+    $preflight = "LIBMESH_CONFIG=$RepoRootPosix/moose/libmesh/installed/bin/libmesh-config && PETSC_SRC_DIR=$RepoRootPosix/moose/petsc && if [ ! -x `"`$LIBMESH_CONFIG`" ]; then echo 'ERROR: libmesh-config missing or not executable:'; ls -la $RepoRootPosix/moose/libmesh/installed/bin/; exit 1; fi && echo '--- libmesh-config --cxx ---' && METHOD=$Method `"`$LIBMESH_CONFIG`" --cxx && echo '--- libmesh-config --cppflags ---' && METHOD=$Method `"`$LIBMESH_CONFIG`" --cppflags && echo '--- libmesh-config --include ---' && LIBMESH_INCLUDE_OUT=`$(METHOD=$Method `"`$LIBMESH_CONFIG`" --include) && echo `"`$LIBMESH_INCLUDE_OUT`" && case `"`$LIBMESH_INCLUDE_OUT`" in *petsc*) ;; *) echo 'ERROR: libmesh-config --include has no PETSc paths; libmesh was likely configured without PETSc (check PETSC_DIR/PETSC_ARCH at libmesh configure time)'; exit 1;; esac && echo '--- PETSc source tree ---' && git -C `"`$PETSC_SRC_DIR`" rev-parse HEAD && if [ -d `"`$PETSC_SRC_DIR/include`" ]; then echo 'petsc include entries:' `$(ls `"`$PETSC_SRC_DIR/include`" | wc -l)`; if [ -f `"`$PETSC_SRC_DIR/include/petscsys.h`" ]; then echo 'petscsys.h: present'; else echo 'petscsys.h: MISSING'; fi; else echo 'petsc include dir MISSING'; fi && echo '--- PETSc headers ---' && ls $RepoRootPosix/moose/petsc/arch-windows-opt/include/petscconf.h $RepoRootPosix/moose/petsc/include/petscsys.h"
+    Invoke-MsysBash $preflight "Verifying dependency include flags for Rabbit"
+    $rabbitBuild = "make -j$Jobs METHOD=$Method LIBMESH_DIR=$RepoRootPosix/moose/libmesh/installed WASP_DIR=$RepoRootPosix/moose/framework/contrib/wasp/install lib_suffix=a && if [ -f .libs/rabbit-$Method.exe ]; then cp .libs/rabbit-$Method.exe rabbit-$Method.exe; elif [ -f .libs/rabbit-$Method ]; then cp .libs/rabbit-$Method rabbit-$Method.exe; elif [ -f rabbit-$Method ] && [ ! -f rabbit-$Method.exe ]; then cp rabbit-$Method rabbit-$Method.exe; fi"
+    Invoke-MsysBash $rabbitBuild "Compiling and linking Rabbit"
 
-if (-not (Test-Path $RabbitExe)) {
-    throw "Expected binary $RabbitExe was not generated."
+    if (-not (Test-Path $RabbitExe)) {
+        Write-Host "`n[!] $RabbitExe not found. Searching for rabbit binaries..." -ForegroundColor Red
+        Get-ChildItem -Path $RepoRoot -Filter "rabbit*" | ForEach-Object { Write-Host "  $($_.FullName)" }
+        $libsDir = Join-Path $RepoRoot ".libs"
+        if (Test-Path $libsDir) {
+            Get-ChildItem -Path $libsDir -Filter "rabbit*" | ForEach-Object { Write-Host "  $($_.FullName)" }
+        }
+        throw "Expected binary $RabbitExe was not generated."
+    }
+    Write-Host "`n============================================================" -ForegroundColor Green
+    Write-Host " Rabbit-FEM Windows build SUCCEEDED!" -ForegroundColor Green
+    Write-Host " Executable: $RabbitExe" -ForegroundColor Green
+
+    # 11. Stage executable into package
+    $BinTarget = Join-Path $RepoRoot "src\rabbit\bin"
+    if (-not (Test-Path $BinTarget)) {
+        New-Item -ItemType Directory -Force -Path $BinTarget | Out-Null
+    }
+    Copy-Item $RabbitExe (Join-Path $BinTarget "rabbit.exe") -Force
+    Write-Host "[OK] Staged executable to $BinTarget\rabbit.exe" -ForegroundColor Green
 }
-Write-Host "`n============================================================" -ForegroundColor Green
-Write-Host " Rabbit-FEM Windows build SUCCEEDED!" -ForegroundColor Green
-Write-Host " Executable: $RabbitExe" -ForegroundColor Green
-# 11. Stage executable into package
-$BinTarget = Join-Path $RepoRoot "src\rabbit\bin"
-if (-not (Test-Path $BinTarget)) {
-    New-Item -ItemType Directory -Force -Path $BinTarget | Out-Null
-}
-Copy-Item $RabbitExe (Join-Path $BinTarget "rabbit.exe") -Force
-Write-Host "[OK] Staged executable to $BinTarget\rabbit.exe" -ForegroundColor Green
 
 # 12. Run Verification Tests
-if (-not $SkipTests) {
+if (($Stage -eq "test" -or $Stage -eq "all") -and -not $SkipTests) {
     Write-Host "`n[*] Running simulation regression test suite..." -ForegroundColor Yellow
     $env:PYTHONPATH = "src"
     & $VenvPython -m pytest (Join-Path $RepoRoot "test") -v

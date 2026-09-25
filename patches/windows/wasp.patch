@@ -1,0 +1,49 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 677cdff..e51b98d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -45,6 +45,7 @@ IF(BUILD_SHARED_LIBS)
+ ENDIF()
+ IF("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+    ADD_DEFINITIONS("-DNOMINMAX")
++   SET(CMAKE_DEPENDS_USE_COMPILER FALSE CACHE BOOL "" FORCE)
+ ENDIF()
+ SET(CMAKE_CXX_STANDARD 11)
+ SET(CMAKE_CXX_STANDARD_REQUIRED ON)
+diff --git a/waspcore/CMakeLists.txt b/waspcore/CMakeLists.txt
+index 43bec20..5962771 100644
+--- a/waspcore/CMakeLists.txt
++++ b/waspcore/CMakeLists.txt
+@@ -41,8 +41,9 @@ TRIBITS_ADD_LIBRARY(waspcore
+ 
+ # Expose directories for the python wrappers to use
+ target_include_directories( waspcore
+-  PRIVATE
++  PUBLIC
+   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
++  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
+   )
+ #set_property(TARGET waspcore PROPERTY PUBLIC_HEADER ${HEADERS})
+ 
+diff --git a/waspcore/Format.h b/waspcore/Format.h
+index 6deddc6..8c6499f 100644
+--- a/waspcore/Format.h
++++ b/waspcore/Format.h
+@@ -35,7 +35,7 @@ class WASP_PUBLIC Format
+     {
+ // if Windows, only output two-digits of exponent if possible like linux
+ #ifdef _WIN32
+-#if (defined(_MSC_VER) && _MSC_VER < 1900) || (defined(__GNUC__))
++#if (defined(_MSC_VER) && _MSC_VER < 1900) || (defined(__GNUC__) && defined(_TWO_DIGIT_EXPONENT))
+         unsigned int old_exponent_format;
+         old_exponent_format = _set_output_format(_TWO_DIGIT_EXPONENT);
+ #endif
+@@ -184,7 +184,7 @@ class WASP_PUBLIC Format
+             }
+         }  // eo while loop
+ #ifdef _WIN32
+-#if (defined(_MSC_VER) && _MSC_VER < 1900) || (defined(__GNUC__))
++#if (defined(_MSC_VER) && _MSC_VER < 1900) || (defined(__GNUC__) && defined(_TWO_DIGIT_EXPONENT))
+         _set_output_format(old_exponent_format);
+ #endif
+ #endif

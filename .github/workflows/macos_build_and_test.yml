@@ -1,0 +1,238 @@
+name: "macOS: Build Wheel and Test"
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  macos-build-and-test:
+    name: "macOS: Build Wheel and Test"
+    runs-on: macos-15
+    timeout-minutes: 300
+
+    steps:
+      - name: "macOS: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: "macOS: Install system packages"
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          brew install \
+            open-mpi \
+            gcc \
+            llvm \
+            libomp \
+            hdf5-mpi \
+            bison \
+            flex \
+            pkgconf \
+            cmake
+          echo "/opt/homebrew/opt/bison/bin" >> $GITHUB_PATH
+          echo "/opt/homebrew/opt/flex/bin" >> $GITHUB_PATH
+          echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+          echo "/opt/homebrew/bin" >> $GITHUB_PATH
+
+      - name: "macOS: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "macOS: Set up Python"
+        run: |
+          uv python install 3.13
+          uv venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: "macOS: Install Python build tools"
+        run: |
+          uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh
+
+      # --- Top-Level Fast Path: Wheel Cache ---
+      - name: "macOS: Restore wheel cache"
+        uses: actions/cache/restore@v4
+        id: wheel-cache
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/lib
+          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/build/**', 'build_rabbit.py') }}
+
+      # --- Stage 1: PETSc Dependency ---
+      - name: "macOS: Restore PETSc cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: petsc-cache
+        with:
+          path: moose/petsc
+          key: macos-petsc-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            macos-petsc-
+
+      - name: "macOS: Build PETSc"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.petsc-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --build-petsc
+
+      - name: "macOS: Save PETSc cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.petsc-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: moose/petsc
+          key: macos-petsc-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+
+      # --- Stage 2: libMesh Dependency ---
+      - name: "macOS: Restore libMesh cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: libmesh-cache
+        with:
+          path: moose/libmesh/installed
+          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            macos-libmesh-
+
+      - name: "macOS: Build libMesh"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.libmesh-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --build-libmesh
+
+      - name: "macOS: Save libMesh cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.libmesh-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: moose/libmesh/installed
+          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+
+      # --- Stage 3: WASP and HIT Dependency ---
+      - name: "macOS: Restore WASP cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: wasp-cache
+        with:
+          path: |
+            moose/framework/contrib/wasp/install
+            moose/framework/contrib/hit
+          key: macos-wasp-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            macos-wasp-
+
+      - name: "macOS: Build WASP and HIT"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.wasp-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --build-wasp
+
+      - name: "macOS: Save WASP cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.wasp-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            moose/framework/contrib/wasp/install
+            moose/framework/contrib/hit
+          key: macos-wasp-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+
+      # --- Stage 4: MOOSE Framework Configuration ---
+      - name: "macOS: Restore MOOSE Config cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mooseconfig-cache
+        with:
+          path: moose/framework/include/base/MooseConfig.h
+          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            macos-mooseconfig-
+
+      - name: "macOS: Configure MOOSE"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --configure-moose
+
+      - name: "macOS: Save MOOSE Config cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: moose/framework/include/base/MooseConfig.h
+          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+
+      # --- Stage 5: Build Rabbit Application and Wheel ---
+      - name: "macOS: Build Rabbit, stage artifacts, and build wheel"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --wheel
+
+      - name: "macOS: Run test suite"
+        run: |
+          uv run python build_rabbit.py --test
+
+      - name: "macOS: Save wheel cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/lib
+          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'scripts/build/**', 'build_rabbit.py') }}
+
+      - name: "macOS: Upload wheel artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rabbit-fem-macos-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+      - name: "macOS: Upload build failure logs"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build-failure-logs
+          path: |
+            moose/petsc/arch-moose/lib/petsc/conf/configure.log
+            moose/petsc/arch-moose/lib/petsc/conf/make.log
+            moose/petsc/configure.log
+            moose/petsc/make.log
+            moose/scripts/libmesh_diagnostic.log
+            moose/libmesh/build/config.log
+            moose/libmesh/config.log
+          if-no-files-found: ignore
+
+      - name: "macOS: Post failure comment"
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          paste_url=""
+          log_file=""
+          for cand in moose/scripts/libmesh_diagnostic.log moose/petsc/arch-moose/lib/petsc/conf/make.log moose/petsc/make.log moose/libmesh/build/config.log moose/libmesh/config.log moose/petsc/arch-moose/lib/petsc/conf/configure.log moose/petsc/configure.log; do
+            if [ -f "$cand" ]; then
+              log_file="$cand"
+              break
+            fi
+          done
+          if [ -n "$log_file" ]; then
+            paste_url=$(tail -n 2000 "$log_file" | curl -s --data-binary @- https://paste.rs || true)
+            tail_content=$(tail -n 80 "$log_file")
+          else
+            tail_content="No specific configure or build log found."
+          fi
+          printf "### ❌ macOS Build Failure on commit %s\n\n" "${{ github.sha }}" > comment.txt
+          if [ -n "$paste_url" ]; then
+            printf "**Failure Log (last 2000 lines):** %s\n\n" "$paste_url" >> comment.txt
+          fi
+          printf '```text\n%s\n```\n' "$tail_content" >> comment.txt
+          gh pr comment 1 -R ${{ github.repository }} --body-file comment.txt || true

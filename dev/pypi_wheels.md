@@ -67,7 +67,8 @@ password = pypi-<your-testpypi-token>
    - Strips debug symbols from the binary and `.so` libraries.
    - Rewrites RPATHs with `patchelf` to `$ORIGIN/../lib` and `$ORIGIN`.
    - Stages files into `src/rabbit/bin` and `src/rabbit/lib`.
-   - Packages the wheel and automatically retags it to `manylinux_2_35_x86_64.manylinux_2_38_x86_64.linux_x86_64`.
+   - Packages the wheel and retags it to the single PEP 600 platform tag
+     `manylinux_2_38_x86_64`.
    - Runs the test suite in `test/test_simulations.py` (which audits relocatability with `readelf` and runs all benchmark simulations).
 
 ---

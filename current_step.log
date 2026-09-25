@@ -1,0 +1,74 @@
+[33mWARNING: Failed to initialize PreMake for version checking; this may be ignored but may suggest an environment issue.
+
+Traceback (most recent call last):
+  File "/c/Users/longb/rabbit-fem/moose/framework/../scripts/premake.py", line 21, in __init__
+    from versioner import Versioner
+  File "/c/Users/longb/rabbit-fem/moose/scripts/versioner.py", line 32, in <module>
+    import jinja2
+ModuleNotFoundError: No module named 'jinja2'
+[0m
+Traceback (most recent call last):
+  File "/c/Users/longb/rabbit-fem/moose/framework/../scripts/premake.py", line 273, in <module>
+    PreMake().check()
+    ^^^^^^^^^
+  File "/c/Users/longb/rabbit-fem/moose/framework/../scripts/premake.py", line 28, in __init__
+    self.packages = Versioner().get_packages("HEAD")
+                    ^^^^^^^^^
+UnboundLocalError: cannot access local variable 'Versioner' where it is not associated with a value
+make: [/c/Users/longb/rabbit-fem/moose/framework/moose.mk:556: prebuild] Error 1 (ignored)
+Creating Unity /c/Users/longb/rabbit-fem/moose/framework/build/unity_src/utils_Unity.C
+Creating Unity /c/Users/longb/rabbit-fem/build/unity_src/rabbit_bin_Unity.C
+Compiling C++ (in opt mode) /c/Users/longb/rabbit-fem/moose/framework/build/unity_src/utils_Unity.C...
+Compiling C++ (in opt mode) /c/Users/longb/rabbit-fem/build/unity_src/rabbit_bin_Unity.C...
+Linking Library /c/Users/longb/rabbit-fem/lib/librabbit-opt.la...
+In file included from C:/Users/longb/rabbit-fem/moose/framework/build/unity_src/utils_Unity.C:16:
+In file included from C:/Users/longb/rabbit-fem/moose/framework/src/utils/DelimitedFileReader.C:20:
+In file included from C:/Users/longb/rabbit-fem/moose/framework/contrib/pcre/include/pcrecpp.h:335:
+C:/Users/longb/rabbit-fem/moose/framework/contrib/pcre/include/pcrecpparg.h:138:13: warning: 'pcrecpp::Arg::Arg' redeclared inline; 'dllimport' attribute ignored [-Wignored-attributes]
+  138 | inline Arg::Arg() : arg_(NULL), parser_(parse_null) { }
+      |             ^
+C:/Users/longb/rabbit-fem/moose/framework/contrib/pcre/include/pcrecpparg.h:139:13: warning: 'pcrecpp::Arg::Arg' redeclared inline; 'dllimport' attribute ignored [-Wignored-attributes]
+  139 | inline Arg::Arg(void* p) : arg_(p), parser_(parse_null) { }
+      |             ^
+C:/Users/longb/rabbit-fem/moose/framework/contrib/pcre/include/pcrecpparg.h:141:18: warning: 'pcrecpp::Arg::Parse' redeclared inline; 'dllimport' attribute ignored [-Wignored-attributes]
+  141 | inline bool Arg::Parse(const char* str, int n) const {
+      |                  ^
+In file included from C:/Users/longb/rabbit-fem/moose/framework/build/unity_src/utils_Unity.C:20:
+C:/Users/longb/rabbit-fem/moose/framework/src/utils/ExecutablePath.C:27:8: warning: unused variable 'path' [-Wunused-variable]
+   27 |   char path[1024];
+      |        ^~~~
+4 warnings generated.
+Linking Library /c/Users/longb/rabbit-fem/moose/framework/libmoose-opt.la...
+Linking Executable /c/Users/longb/rabbit-fem/rabbit-opt...
+lld-link: warning: libmoose-opt.a(base_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::Replace(pcrecpp::StringPiece const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>*) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(base_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::~RE() (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(base_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::Init(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>> const&, pcrecpp::RE_Options const*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(base_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::Arg::parse_stringpiece(char const*, int, void*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(base_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::no_arg (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(base_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::FindAndConsume(pcrecpp::StringPiece*, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(base_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::GlobalReplace(pcrecpp::StringPiece const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>*) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(mesh_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::Arg::parse_int(char const*, int, void*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(mesh_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::no_arg (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(mesh_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::PartialMatch(pcrecpp::StringPiece const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(mesh_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::~RE() (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(mesh_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::Init(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>> const&, pcrecpp::RE_Options const*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(meshgenerators_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::Arg::parse_int(char const*, int, void*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(meshgenerators_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::no_arg (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(meshgenerators_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::PartialMatch(pcrecpp::StringPiece const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(meshgenerators_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::~RE() (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(meshgenerators_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::Init(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>> const&, pcrecpp::RE_Options const*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(parser_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::Arg::parse_string(char const*, int, void*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(parser_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::no_arg (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(parser_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::FullMatch(pcrecpp::StringPiece const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(parser_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::~RE() (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(parser_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::Init(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>> const&, pcrecpp::RE_Options const*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::Init(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>> const&, pcrecpp::RE_Options const*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::Arg::parse_string(char const*, int, void*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::Arg::parse_uint(char const*, int, void*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::no_arg (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::FullMatch(pcrecpp::StringPiece const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::~RE() (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::GlobalReplace(pcrecpp::StringPiece const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>*) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::Arg::parse_int(char const*, int, void*) (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::Consume(pcrecpp::StringPiece*, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]
+lld-link: warning: libmoose-opt.a(utils_Unity.x86_64-w64-mingw32.opt.obj): locally defined symbol imported: pcrecpp::RE::FindAndConsume(pcrecpp::StringPiece*, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&, pcrecpp::Arg const&) const (defined in libpcre-opt.a(pcrecpp.x86_64-w64-mingw32.opt.obj)) [LNK4217]

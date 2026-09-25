@@ -112,7 +112,7 @@ uv run python src/rabbit/examples/ex1_dogbone.py
 3. **MSYS2** (used strictly for Unix shell utilities and GNU Make needed by PETSc/libMesh/MOOSE configure and build scripts; compilation itself is handled by Zig):
    ```powershell
    winget install --id MSYS2.MSYS2 --source winget
-   C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make diffutils patch python m4
+   C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make diffutils patch python m4 git
    ```
 
 #### 1-Step Automated Windows Build
@@ -166,12 +166,12 @@ This generates `dist/rabbit_fem-2026.9.0-py3-none-win_amd64.whl` (~56 MB, fully 
 #### Prerequisites (Linux)
 
 - **OS**: Linux x86_64 (Ubuntu 22.04+ or compatible)
-- **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`
+- **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`, `libtirpc-dev`, `libomp-dev`, `libglu1-mesa`
 - **Python**: Python 3.10+ with [`uv`](https://docs.astral.sh/uv/)
 
 ```bash
 sudo apt-get update && sudo apt-get install -y \
-    build-essential gfortran libopenmpi-dev openmpi-bin patchelf
+    build-essential gfortran libopenmpi-dev openmpi-bin patchelf libtirpc-dev libomp-dev libglu1-mesa
 
 # Set up Python environment
 uv venv .venv
@@ -179,27 +179,30 @@ source .venv/bin/activate
 uv pip install -e ".[dev]"
 ```
 
-#### The 2-Step Build Flow (Linux)
+#### Multi-Stage Build Architecture
+
+`rabbit-fem` separates compilation into five discrete, cacheable stages:
 
 ```mermaid
-flowchart LR
-    subgraph Step1["Step 1: MOOSE Dependencies (One-Time)"]
-        A["uv run python build_rabbit.py --moose"]
-    end
-    subgraph Step2["Step 2: Build, Stage & Wheel"]
-        B["uv run python build_rabbit.py --wheel --test"]
-    end
-    Step1 --> Step2
+flowchart TD
+    S1["Stage 1: PETSc<br/><code>--build-petsc</code>"] --> S2["Stage 2: libMesh<br/><code>--build-libmesh</code>"]
+    S2 --> S3["Stage 3: WASP & HIT<br/><code>--build-wasp</code>"]
+    S3 --> S4["Stage 4: MOOSE Config<br/><code>--configure-moose</code>"]
+    S4 --> S5["Stage 5: Rabbit & Wheel<br/><code>--wheel --test</code>"]
 ```
 
-##### Step 1: Upstream MOOSE Dependencies (One-Time Setup)
-
-Clones upstream MOOSE (if needed), compiles PETSc, libMesh, and WASP, and configures MOOSE:
-
+##### Step 1: Upstream MOOSE Dependencies
+You can compile all dependencies at once:
 ```bash
 uv run python build_rabbit.py --moose
 ```
-*(Optionally pass a custom path: `--moose /path/to/moose`)*
+Or execute individual stages independently:
+```bash
+uv run python build_rabbit.py --build-petsc
+uv run python build_rabbit.py --build-libmesh
+uv run python build_rabbit.py --build-wasp
+uv run python build_rabbit.py --configure-moose
+```
 
 ##### Step 2: Build Rabbit, Stage Artifacts & Package Wheel
 
@@ -215,14 +218,36 @@ uv run python build_rabbit.py --wheel --test
 
 | Command / Flag | Description |
 |---|---|
-| `uv run python build_rabbit.py --moose [PATH]` | Build upstream MOOSE dependencies (PETSc, libMesh, WASP) |
-| `uv run python build_rabbit.py` | Compile Rabbit and stage relocatable binaries in `src/rabbit/` |
-| `uv run python build_rabbit.py --wheel` | Compile Rabbit, stage artifacts, and build wheel in `dist/` |
-| `uv run python build_rabbit.py --wheel-only` | Package existing staged artifacts into `dist/*.whl` without recompiling |
-| `uv run python build_rabbit.py --test` | Run pytest simulation and relocatability test suite (alias: `--tests`) |
-| `uv run python build_rabbit.py --all` | Full pipeline: MOOSE build, Rabbit build, staging, wheel, and tests |
+| `--build-petsc` | Build only upstream PETSc dependency stage |
+| `--build-libmesh` | Build only upstream libMesh dependency stage |
+| `--build-wasp` | Build only upstream WASP parser and HIT utility stage |
+| `--configure-moose` | Run only MOOSE framework configuration stage (`MooseConfig.h`) |
+| `--moose [PATH]` | Build all upstream MOOSE dependencies (PETSc, libMesh, WASP) |
+| `--setup-wrappers` | Generate only compiler wrapper scripts in `.zig_wrappers/` |
+| `[default]` | Compile Rabbit and stage relocatable binaries in `src/rabbit/` |
+| `--wheel` | Compile Rabbit, stage artifacts, and build wheel in `dist/` |
+| `--wheel-only` | Package existing staged artifacts into `dist/*.whl` without recompiling |
+| `--test` / `--tests` | Run pytest simulation and relocatability test suite |
+| `--all` | Full pipeline: MOOSE build, Rabbit build, staging, wheel, and tests |
 
-Alternatively, you can trigger the build using the Zig build system:
+#### Windows PowerShell Stages
+
+On Windows, `scripts/install_dependencies_windows.ps1` accepts the `-Stage` parameter:
+
+```powershell
+# Build individual stages
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage petsc
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage libmesh
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage wasp
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage moose
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage rabbit
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage test
+
+# Full pipeline
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage all
+```
+
+Alternatively, you can trigger builds using the Zig build system:
 
 ```bash
 zig build
