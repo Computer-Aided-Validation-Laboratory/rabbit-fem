@@ -222,8 +222,30 @@ def prepare_darwin_rabbit_sources(
     apply_macos_patches(moose_dir, repo_dir)
 
 
+def _otool_rpaths(macho_path: Path) -> list[str]:
+    """List LC_RPATH entries of a Mach-O binary via otool."""
+    res = subprocess.run(
+        ["otool", "-l", str(macho_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    rpaths: list[str] = []
+    in_rpath = False
+    for line in res.stdout.splitlines():
+        stripped = line.strip()
+        if stripped == "cmd LC_RPATH":
+            in_rpath = True
+        elif stripped.startswith("cmd "):
+            in_rpath = False
+        elif in_rpath and stripped.startswith("path "):
+            rpaths.append(stripped.split()[1])
+            in_rpath = False
+    return rpaths
+
+
 def relink_darwin_staged_artifacts(bin_path: Path, lib_dir: Path) -> None:
-    """Rewrite staged Mach-O IDs and load commands to @rpath form.
+    """Rewrite staged Mach-O IDs, load commands, and RPATHs to @rpath form.
 
     The macOS linker records absolute build-tree paths in LC_ID and
     LC_LOAD_DYLIB (unlike ELF, which records SONAMEs resolved via
@@ -279,6 +301,38 @@ def relink_darwin_staged_artifacts(bin_path: Path, lib_dir: Path) -> None:
                     ],
                     check=True,
                 )
+    # Absolute RPATHs baked in at link time (e.g. Homebrew prefixes
+    # from the toolchain LDFLAGS) are hardcoded host paths in the
+    # shipped tree: absolute dependencies resolve without RPATH
+    # lookup, and @rpath references now resolve via the canonical
+    # @loader_path entries below. Remove them; keep/add only the
+    # canonical entries. Existence is checked via otool first so no
+    # failure is ever ignored (no check=False duplicate tolerance).
+    for macho_path, canonical in [
+        (bin_path, "@loader_path/../lib"),
+        *((lib, "@loader_path") for lib in staged.values()),
+    ]:
+        for rpath in _otool_rpaths(macho_path):
+            if not rpath.startswith("@loader_path"):
+                subprocess.run(
+                    [
+                        "install_name_tool",
+                        "-delete_rpath",
+                        rpath,
+                        str(macho_path),
+                    ],
+                    check=True,
+                )
+        if canonical not in _otool_rpaths(macho_path):
+            subprocess.run(
+                [
+                    "install_name_tool",
+                    "-add_rpath",
+                    canonical,
+                    str(macho_path),
+                ],
+                check=True,
+            )
 
 
 def build_libmesh(

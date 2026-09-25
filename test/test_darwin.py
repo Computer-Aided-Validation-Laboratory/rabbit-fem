@@ -505,6 +505,29 @@ def test_relink_rewrites_staged_refs_to_rpath(
             "\t/usr/lib/libSystem.B.dylib (compat 1.0.0)\n"
         ),
     }
+
+    def _rpath_cmd(name: str, path: str) -> str:
+        return (
+            f"{name}:\n"
+            "Load command 1\n"
+            "      cmd LC_RPATH\n"
+            f"  cmdsize 48\n          path {path} (offset 12)\n"
+            "Load command 2\n"
+            "      cmd LC_SEGMENT_64\n"
+        )
+
+    # Rabbit carries an absolute Homebrew RPATH (the CI failure) and
+    # no canonical entry; libmesh already has exactly the canonical
+    # entry; the test lib has no RPATH at all.
+    otool_l_outputs = {
+        "rabbit": _rpath_cmd("rabbit", "/opt/homebrew/opt/hdf5-mpi/lib"),
+        "librabbit_test-opt.0.dylib": (
+            "librabbit_test-opt.0.dylib:\n"
+            "Load command 0\n"
+            "      cmd LC_SEGMENT_64\n"
+        ),
+        "libmesh_opt.dylib": _rpath_cmd("libmesh_opt.dylib", "@loader_path"),
+    }
     calls: list[list[str]] = []
 
     def fake_run(
@@ -514,6 +537,8 @@ def test_relink_rewrites_staged_refs_to_rpath(
         assert kwargs.get("check") is True
         if cmd[0] == "otool":
             name = Path(cmd[-1]).name
+            if "-l" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, otool_l_outputs[name])
             return subprocess.CompletedProcess(cmd, 0, otool_outputs[name])
         assert cmd[0] == "install_name_tool"
         return subprocess.CompletedProcess(cmd, 0, "")
@@ -545,3 +570,16 @@ def test_relink_rewrites_staged_refs_to_rpath(
     # shared (/opt/homebrew MPI) references must be left untouched.
     for old, _new, _target in rewritten:
         assert old.startswith("/Users/runner")
+
+    delete_calls = [c for c in calls if "-delete_rpath" in c]
+    assert [
+        (c[2], Path(c[3]).name) for c in delete_calls
+    ] == [("/opt/homebrew/opt/hdf5-mpi/lib", "rabbit")]
+
+    add_calls = [c for c in calls if "-add_rpath" in c]
+    added = [(c[2], Path(c[3]).name) for c in add_calls]
+    # Binary lacked its canonical entry; libmesh already had it;
+    # the test lib needed its canonical entry.
+    assert ("@loader_path/../lib", "rabbit") in added
+    assert ("@loader_path", "librabbit_test-opt.0.dylib") in added
+    assert not [a for a in added if a[1] == "libmesh_opt.dylib"]

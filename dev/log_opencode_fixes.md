@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: absolute Homebrew RPATHs shipped in staged tree (step 2)
+
+- **CI run**: macOS `36180376611` (failed at 18m in `Run test suite`, `9 passed, 1 failed`) — the `@rpath` relink held (linked-path step 1 green). Step 2 failed: `Non-relocatable RPATH '/opt/homebrew/opt/hdf5-mpi/lib' in rabbit`.
+- **Root cause**: the project's own `get_darwin_tool_env` injects `-Wl,-rpath,<brew-prefix>/lib` LDFLAGS, so the staged binary carries absolute Homebrew RPATHs. Absolute deps resolve without RPATH lookup and staged `@rpath` refs resolve via the canonical `@loader_path` entries, making these baked-in prefixes both redundant and hardcoded host paths in the shipped artifact. The assertion is correct; staging was incomplete.
+- **Fix**: extended `relink_darwin_staged_artifacts()` — after `-id`/`-change`, it parses each staged file's LC_RPATHs (`otool -l` state machine, shared `_otool_rpaths` helper), deletes every entry not starting with `@loader_path`, and adds the canonical entry (`@loader_path/../lib` for the binary, `@loader_path` for libs) only when absent. Also removed the old `check=False` `-add_rpath` block from `stage_artifacts` (single ownership, no more duplicate-tolerance error hiding); every tool call is `check=True`.
+- **Platform considerations**: darwin-only path; Linux/Windows staging untouched.
+- **Files changed**: `scripts/build/darwin.py`, `scripts/build/common.py` (net deletion of the old block), `test/test_darwin.py` (extended mock test: delete of the Homebrew RPATH, canonical adds where missing, no duplicate add).
+- **Verification**: 25 unit tests pass; `py_compile` + `git diff --check` clean. CI step 3 (isolated execution on the runner) is the empirical guard against over-deletion: if a staged file needed an absolute RPATH for a non-staged `@rpath` dep, dyld will fail there by name.
+- **Remaining uncertainty**: whether any staged file holds an `@rpath` reference to a *non-staged* lib that relied on a now-deleted absolute RPATH — step 3 of the next mac round decides (no such ref is visible in current evidence).
+
 ## 2026-09-25 — macOS: staged binary kept absolute LC_LOAD_DYLIB (real relocatability bug)
 
 - **CI run**: macOS `36178001268` (failed at 19m in `Run test suite`, `9 passed, 1 failed`) — the ensure-before-patch fix held (framework compiled, 40 libs staged, 45 MB wheel built, all sim tests green). The new `darwin` otool branch failed loudly as designed: `Forbidden hardcoded path '/Users/runner/.../test/lib/librabbit_test-opt.0.dylib' linked by rabbit binary`.
