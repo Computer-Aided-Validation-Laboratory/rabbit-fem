@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — macOS: `conf_vars.mk` never cached alongside `MooseConfig.h`
+
+- **CI run**: macOS `36171696370` (failed at 10m in `Build Rabbit`, `PNGOutput.h: fatal error: 'png.h'`) — warm caches, fresh `Configure MOOSE` skipped.
+- **Root cause**: only `MooseConfig.h` (the PNG on/off decision) is cached, never the generated `conf_vars.mk` that carries the matching `-I` flags (`libPNG_INCLUDE`). On cache-hit runs `-include` silently tolerates its absence, so even a correct `HAVE_LIBPNG=1` compiles with no png `-I`. Linux survives only because Ubuntu images ship `png.h` in default `/usr/include`. Proven: local `conf_vars.mk` exists purely as configure output; no workflow or script references it; the failing run restored the header and skipped configure.
+- **Fix**: (1) cache `moose/conf_vars.mk` with `MooseConfig.h` (restore+save) so decision and flags travel together; (2) new `check_cached_moose_config()` runs on every `configure_moose` — if the cached header claims PNG but the flags file is missing or points nowhere with `png.h`, both are deleted so configure re-runs fresh (self-healing against already-poisoned saves; prefix-fallback restores can't re-poison). PNG-disabled configs pass through untouched.
+- **Files changed**: `.github/workflows/macos_build_and_test.yml`, `scripts/build/darwin.py`, `test/test_darwin.py`.
+- **Verification**: 4 new unit tests (consistent/disabled/missing-vars/broken-flags); `pytest` → 22 passed.
+- **Remaining uncertainty**: none on mechanism. (Near-miss caught during edit: briefly wrote a `linux-` cache key into the macOS file — fixed before push; asymmetric key prefixes across OSes deserve a future lint.)
+
 ## 2026-09-25 — macOS: libpng metadata without headers breaks MOOSE configure contract
 
 - **CI run**: macOS `36165248598` (failed at 10m in `Build Rabbit`; warm caches skipped all dep builds — libMesh+WASP+config previously proven green).

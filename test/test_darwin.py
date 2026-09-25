@@ -158,6 +158,65 @@ def test_libpng_without_headers_raises(
         darwin.check_libpng_consistency({"PATH": "/fake/bin"})
 
 
+def _write_cached_config(
+    moose_dir: Path,
+    with_png: bool = True,
+    with_vars: bool = True,
+    vars_have_headers: bool = True,
+) -> Path:
+    """Stage a fake cached MOOSE config plus optional flags file."""
+    cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text(
+        "#define MOOSE_HAVE_LIBPNG 1\n" if with_png else "// no png\n",
+        encoding="utf-8",
+    )
+    inc = moose_dir / "sys_include"
+    inc.mkdir(exist_ok=True)
+    (inc / "png.h").write_bytes(b"fake")
+    vars_mk = moose_dir / "conf_vars.mk"
+    if with_vars:
+        flag = f"-I{inc}" if vars_have_headers else "-I/missing"
+        vars_mk.write_text(
+            f"libPNG_LIBS       := -lpng\nlibPNG_INCLUDE    := {flag}\n",
+            encoding="utf-8",
+        )
+    return cfg
+
+
+def test_cached_config_consistent_is_kept(tmp_path: Path) -> None:
+    """A consistent cached config must survive untouched."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_cached_config(moose_dir)
+    darwin.check_cached_moose_config(moose_dir)
+    assert cfg.is_file()
+
+
+def test_cached_config_without_png_is_kept(tmp_path: Path) -> None:
+    """A cached config with PNG disabled needs no flags file."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_cached_config(moose_dir, with_png=False, with_vars=False)
+    darwin.check_cached_moose_config(moose_dir)
+    assert cfg.is_file()
+
+
+def test_cached_config_missing_vars_heals(tmp_path: Path) -> None:
+    """Header without its flags file (the CI failure) must be removed."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_cached_config(moose_dir, with_vars=False)
+    darwin.check_cached_moose_config(moose_dir)
+    assert not cfg.exists()
+
+
+def test_cached_config_broken_flags_heals(tmp_path: Path) -> None:
+    """Header with flags pointing nowhere must be removed with them."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_cached_config(moose_dir, vars_have_headers=False)
+    darwin.check_cached_moose_config(moose_dir)
+    assert not cfg.exists()
+    assert not (moose_dir / "conf_vars.mk").exists()
+
+
 @pytest.mark.skipif(
     shutil.which("patch") is None, reason="patch utility not available"
 )

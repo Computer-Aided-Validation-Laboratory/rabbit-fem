@@ -148,12 +148,17 @@ jobs:
           key: macos-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 4: MOOSE Framework Configuration ---
+      # NOTE: conf_vars.mk carries the matching -I flags for the decisions
+      # recorded in MooseConfig.h, so both must travel together. Caching the
+      # header alone once produced 'png.h file not found' deep in the build.
       - name: "macOS: Restore MOOSE Config cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         id: mooseconfig-cache
         with:
-          path: moose/framework/include/base/MooseConfig.h
+          path: |
+            moose/framework/include/base/MooseConfig.h
+            moose/conf_vars.mk
           key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
             macos-mooseconfig-
@@ -167,7 +172,9 @@ jobs:
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: moose/framework/include/base/MooseConfig.h
+          path: |
+            moose/framework/include/base/MooseConfig.h
+            moose/conf_vars.mk
           key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 5: Build Rabbit Application and Wheel ---

@@ -308,6 +308,53 @@ def check_libpng_consistency(tool_env: dict[str, str]) -> None:
         )
 
 
+def check_cached_moose_config(moose_dir: Path) -> None:
+    """Remove a stale cached MOOSE config whose PNG flags disagree.
+
+    Only MooseConfig.h is cached, never the generated conf_vars.mk that
+    carries the matching -I flags. If the cached header enables PNG but
+    the flags file is missing or points nowhere with png.h, delete both
+    so configure below re-runs fresh instead of failing deep in the
+    framework build with 'png.h file not found'.
+    """
+    cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    if not cfg.is_file():
+        return
+    try:
+        text = cfg.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if "MOOSE_HAVE_LIBPNG" not in text:
+        return
+    vars_mk = moose_dir / "conf_vars.mk"
+    usable = False
+    if vars_mk.is_file():
+        try:
+            vars_text = vars_mk.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            vars_text = ""
+        for line in vars_text.splitlines():
+            if line.startswith("libPNG_INCLUDE"):
+                _, _, value = line.partition(":=")
+                include_dirs = [
+                    token[2:]
+                    for token in value.split()
+                    if token.startswith("-I")
+                ]
+                usable = any(
+                    (Path(d) / "png.h").is_file() for d in include_dirs
+                )
+                break
+    if not usable:
+        print(
+            "Cached MOOSE config enables PNG without usable flags; "
+            "removing to force a fresh configure..."
+        )
+        cfg.unlink()
+        if vars_mk.is_file():
+            vars_mk.unlink()
+
+
 def configure_moose(
     repo_dir: Path,
     moose_dir: Path,
@@ -316,13 +363,14 @@ def configure_moose(
 ) -> None:
     """Configure MOOSE framework on macOS."""
     ensure_moose_repo(repo_dir, moose_dir)
+    tool_env = get_darwin_tool_env(zigcc_path, zigcxx_path)
+    check_libpng_consistency(tool_env)
+    check_cached_moose_config(moose_dir)
     moose_cfg = (
         moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
     )
     if not moose_cfg.is_file():
         print("--> Configuring MOOSE...")
-        tool_env = get_darwin_tool_env(zigcc_path, zigcxx_path)
-        check_libpng_consistency(tool_env)
         subprocess.run(
             ["./configure", "--with-derivative-size=89"],
             cwd=str(moose_dir),
