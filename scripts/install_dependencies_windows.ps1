@@ -226,26 +226,23 @@ if ($needWasp -or $needWaspSources) { $subsNeeded += "framework/contrib/wasp" }
 
 # actions/cache restores built libs into hollow submodule dirs, which makes
 # 'git submodule update' refuse to clone ("already exists and is not an
-# empty directory"). Relocate restored build outputs aside so the clone can
-# proceed; they are moved back after a successful update. Orphaned backups
-# from killed runs are resurrected (or pruned if superseded) first.
-$submodulePreserve = @(
-    @{ Sub = "petsc"; Keep = "arch-windows-opt"; Sentinel = "configure" },
-    @{ Sub = "libmesh"; Keep = "installed"; Sentinel = "configure" }
+# empty directory"). Relocate any hollow submodule dir aside so the clone
+# can proceed; preserved outputs are merged back afterwards.
+$submoduleSentinels = @(
+    @{ Sub = "petsc"; Sentinel = "configure" },
+    @{ Sub = "libmesh"; Sentinel = "configure" },
+    @{ Sub = "framework/contrib/wasp"; Sentinel = "CMakeLists.txt" }
 )
 $movedBackups = @()
-foreach ($sp in $submodulePreserve) {
+foreach ($sp in $submoduleSentinels) {
     $subDir = Join-Path $MooseDir $sp.Sub
-    $keepDir = Join-Path $subDir $sp.Keep
     $backupDir = "$subDir.__rabbit_backup"
-    if (Test-Path $backupDir) {
-        if (Test-Path $keepDir) { Remove-Item -Recurse -Force $backupDir }
-        else { Move-Item $backupDir $keepDir }
-    }
-    if ((Test-Path $keepDir) -and -not (Test-Path (Join-Path $subDir $sp.Sentinel))) {
-        if (Test-Path $backupDir) { Remove-Item -Recurse -Force $backupDir }
-        Move-Item $keepDir $backupDir
-        $movedBackups += @{ Backup = $backupDir; Dest = $keepDir }
+    if ((Test-Path $subDir) -and -not (Test-Path (Join-Path $subDir $sp.Sentinel))) {
+        if (Test-Path $backupDir) {
+            throw "Stale submodule backup exists at $backupDir (previous run killed?). Remove it or move it back to $subDir and re-run."
+        }
+        Move-Item $subDir $backupDir
+        $movedBackups += @{ Backup = $backupDir; Dest = $subDir }
     }
 }
 
@@ -270,13 +267,25 @@ if ($subsNeeded.Count -gt 0) {
     }
 }
 
-# Restore relocated build outputs after a successful submodule update.
-# (On exhausted retries the throw below skips this; orphaned backups are
-# resurrected by the loop above on the next run.)
+# Merge preserved build outputs back into the freshly cloned submodules.
+# (On exhausted retries the throw above skips this; the missing-sources
+# check below then fails with the exact paths.)
 foreach ($mb in $movedBackups) {
-    if ((Test-Path $mb.Backup) -and -not (Test-Path $mb.Dest)) {
+    if (-not (Test-Path $mb.Backup)) { continue }
+    if (-not (Test-Path $mb.Dest)) {
         Move-Item $mb.Backup $mb.Dest
+        continue
     }
+    Get-ChildItem -Force $mb.Backup | ForEach-Object {
+        $target = Join-Path $mb.Dest $_.Name
+        if (Test-Path $target) {
+            Write-Host "[!] Preserved output collides with fresh clone, keeping fresh: $($_.Name)" -ForegroundColor Yellow
+        } else {
+            Move-Item $_.FullName $target
+        }
+    }
+    if (@(Get-ChildItem -Force $mb.Backup).Count -eq 0) { Remove-Item $mb.Backup }
+    else { Write-Host "[!] Backup not empty after merge, leaving: $($mb.Backup)" -ForegroundColor Yellow }
 }
 
 # Fail early if submodule sources are still missing (e.g. offline runners).
