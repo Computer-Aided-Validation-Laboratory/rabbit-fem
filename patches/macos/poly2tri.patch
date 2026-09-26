@@ -1,0 +1,12 @@
+--- a/poly2tri/poly2tri/common/shapes.h
++++ b/poly2tri/poly2tri/common/shapes.h
+@@ -36,4 +36,8 @@
+ #include <cmath>
+ #include <cstddef>
+ #include <stdexcept>
++// Required explicitly: this header declares std::ostream streaming
++// operators, which newer libc++ versions (e.g. Homebrew LLVM 23) no longer
++// provide transitively.
++#include <ostream>
+ #include <vector>
+

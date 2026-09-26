@@ -1,5 +1,130 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-25 — Green matrix on bfc941d (all three OS)
+
+- **Runs**: macOS `36184794144` (16m), Linux `36184794342` (22m), Windows `36184794498` (41m) — all `success` on commit `bfc941d`, including `Run test suite` on each OS. The four fixes above (ensure-before-patch, `@rpath` relink, RPATH strip, isolated-layout mirror) compose to a fully green matrix with warm caches.
+
+## 2026-09-25 — macOS: isolated-run copy used nested lib/ layout (test bug)
+
+- **CI run**: macOS `36182628495` (failed at 18m in `Run test suite`, `9 passed, 1 failed`) — steps 1 (linked paths) and 2 (RPATHs) green; step 3 isolated `--version` died SIGABRT: `dyld: Library not loaded: @rpath/librabbit_test-opt.0.dylib`.
+- **Root cause**: test-harness layout bug, not product. Staging lays out `bin/rabbit` + `lib/` as siblings with binary RPATH `@loader_path/../lib`. The darwin test copied the binary to `<iso>/rabbit` and libs to `<iso>/lib/` (nested), so `@rpath` resolved to `<iso>/../lib` — outside the copy. The staged tree and wheel were consistent all along (all 9 sim tests run the staged binary in place).
+- **Fix**: darwin step 3 now mirrors the staged sibling layout (`<iso>/bin/rabbit` + `<iso>/lib/`). No product change; the relocation invariant under test is unchanged, only the harness copy is faithful.
+- **Platform considerations**: test-only, darwin branch; win32/Linux branches untouched.
+- **Files changed**: `test/test_simulations.py` (darwin step-3 layout only).
+- **Verification**: unit suite 25 passed; `py_compile`; layout correctness by construction (`@loader_path=ISO/bin` → `../lib=ISO/lib`). Full proof is the next mac round (step 3 runs the whole staged closure relocated).
+- **Remaining uncertainty**: whether further `@rpath` deps beyond the test lib surface once loading proceeds past it — step 3 will report each by name.
+
+## 2026-09-25 — macOS: absolute Homebrew RPATHs shipped in staged tree (step 2)
+
+- **CI run**: macOS `36180376611` (failed at 18m in `Run test suite`, `9 passed, 1 failed`) — the `@rpath` relink held (linked-path step 1 green). Step 2 failed: `Non-relocatable RPATH '/opt/homebrew/opt/hdf5-mpi/lib' in rabbit`.
+- **Root cause**: the project's own `get_darwin_tool_env` injects `-Wl,-rpath,<brew-prefix>/lib` LDFLAGS, so the staged binary carries absolute Homebrew RPATHs. Absolute deps resolve without RPATH lookup and staged `@rpath` refs resolve via the canonical `@loader_path` entries, making these baked-in prefixes both redundant and hardcoded host paths in the shipped artifact. The assertion is correct; staging was incomplete.
+- **Fix**: extended `relink_darwin_staged_artifacts()` — after `-id`/`-change`, it parses each staged file's LC_RPATHs (`otool -l` state machine, shared `_otool_rpaths` helper), deletes every entry not starting with `@loader_path`, and adds the canonical entry (`@loader_path/../lib` for the binary, `@loader_path` for libs) only when absent. Also removed the old `check=False` `-add_rpath` block from `stage_artifacts` (single ownership, no more duplicate-tolerance error hiding); every tool call is `check=True`.
+- **Platform considerations**: darwin-only path; Linux/Windows staging untouched.
+- **Files changed**: `scripts/build/darwin.py`, `scripts/build/common.py` (net deletion of the old block), `test/test_darwin.py` (extended mock test: delete of the Homebrew RPATH, canonical adds where missing, no duplicate add).
+- **Verification**: 25 unit tests pass; `py_compile` + `git diff --check` clean. CI step 3 (isolated execution on the runner) is the empirical guard against over-deletion: if a staged file needed an absolute RPATH for a non-staged `@rpath` dep, dyld will fail there by name.
+- **Remaining uncertainty**: whether any staged file holds an `@rpath` reference to a *non-staged* lib that relied on a now-deleted absolute RPATH — step 3 of the next mac round decides (no such ref is visible in current evidence).
+
+## 2026-09-25 — macOS: staged binary kept absolute LC_LOAD_DYLIB (real relocatability bug)
+
+- **CI run**: macOS `36178001268` (failed at 19m in `Run test suite`, `9 passed, 1 failed`) — the ensure-before-patch fix held (framework compiled, 40 libs staged, 45 MB wheel built, all sim tests green). The new `darwin` otool branch failed loudly as designed: `Forbidden hardcoded path '/Users/runner/.../test/lib/librabbit_test-opt.0.dylib' linked by rabbit binary`.
+- **Root cause**: genuine product defect, not test overreach (verified, not assumed). The macOS linker records absolute build-tree paths in LC_ID/LC_LOAD_DYLIB, while ELF records SONAMEs resolved via RPATH — so Linux needs only `$ORIGIN` RPATHs but macOS staging must also rewrite load commands. `stage_artifacts` copied the libs and added `@loader_path` RPATHs (with `check=False`, hiding the duplicate-RPATH errors also visible in the log) but never ran `install_name_tool -change/-id`. Proven same-artifact-class on Linux: local `rabbit-opt` also links `librabbit_test-opt.so.0`, yet Linux CI is green because SONAME+RPATH resolves. The staged mac binary therefore ran only where the absolute path exists (the build machine) — the passing sim tests proved nothing about relocation.
+- **Fix**: new `relink_darwin_staged_artifacts()` in `scripts/build/darwin.py`, called from the existing darwin block in `stage_artifacts`: set every staged dylib's ID to `@rpath/<basename>`, rewrite every staged reference (binary + libs) whose basename matches a staged lib to `@rpath/<basename>`. System (`/usr/lib`, `/System`) and non-staged shared deps (e.g. Homebrew MPI) untouched — same bar as Linux. All invocations `check=True` so half-relinked trees fail loudly instead of shipping dyld time-bombs. No test change needed (the assertion was correct).
+- **Platform considerations**: darwin-only code path; Linux/Windows staging byte-identical (block-gated, lazy import).
+- **Files changed**: `scripts/build/darwin.py` (new helper), `scripts/build/common.py` (6-line call in darwin block), `test/test_darwin.py` (1 new test with mocked otool/install_name_tool: absolute staged refs rewritten, `@rpath`/`/usr/lib`/non-staged refs untouched, `-id` set).
+- **Verification**: 25 unit tests pass via repo `.venv`; `py_compile` + `git diff --check` clean. Full proof is the next mac round (steps 1–3 of the darwin relocatability test).
+- **Remaining uncertainty**: whether staged libs carry additional absolute LC_RPATHs that step 2 (`@loader_path`-only assertion) will flag — deliberately left for the next round to decide empirically rather than deleting RPATHs on speculation (could break `@rpath` refs to non-staged libs).
+
+## 2026-09-25 — macOS: Rabbit step patched before framework sources existed (ordering)
+
+- **CI run**: macOS `36176068156` (failed at 11m in `Build Rabbit`, `tinyhttp/http.h: no member named 'transform' / no template named 'function'`) — all dep stages cache-hit and skipped. Same lean-header symptom as the earlier tinyhttp round, but the patch existed this time.
+- **Root cause**: ordering bug, proven from the runner log. `build_rabbit.py::main()` called `apply_macos_patches()` *before* `build_rabbit_binary()` → `ensure_moose_repo()`. On cache-hit runs the framework tree is absent at patch time (no cache provides `moose/framework`), so every `work_dir.is_dir()` guard silently `continue`d; then `ensure_moose_repo` temp-cloned pristine MOOSE and overlaid the framework (`Initialized empty Git repository in .moose_framework_tmp`, `HEAD is now at 975c9a1c`), guaranteeing unpatched sources at compile time. Full-rebuild runs survived only because stage functions ensure-then-patch in the right order. The silent skip violated fail-early/informative behavior.
+- **Fix**: new `prepare_darwin_rabbit_sources()` in `scripts/build/darwin.py` (ensure-then-patch in one named place; the later ensure inside `build_rabbit_binary` becomes a no-op), called from `build_rabbit.py::main()` behind the existing `darwin` gate. Plus `apply_macos_patches` now prints an explicit `WARNING: skipping <patch>: source dir ... not present` when a patch file exists but its tree is absent (stays a skip — dep stages legitimately run with only some trees materialized — but no longer silent).
+- **Platform considerations**: macOS-only files (`scripts/build/darwin.py`, darwin-gated call in `build_rabbit.py`); Linux/Windows flows byte-identical (`ensure_moose_repo` itself is untouched cross-platform code).
+- **Files changed**: `scripts/build/darwin.py`, `build_rabbit.py`, `test/test_darwin.py` (2 new tests).
+- **Verification**: `test_patch_skip_warns_when_source_absent` (absent trees warn loudly, no raise); `test_prepare_ensures_sources_before_patching` (mocked ensure materializes a pristine `http.h`, helper patches it — proves materialize-before-patch ordering); full unit file → 24 passed via repo `.venv`.
+- **Remaining uncertainty**: none on mechanism. Whether further lean-header TUs hide behind tinyhttp in the framework unity build is the same known loop — next CI round tells.
+
+## 2026-09-25 — macOS: relocatability test shelled to Linux-only `readelf`
+
+- **CI run**: macOS `36169255744` (failed at 12m in `Run test suite`, `9 passed, 1 failed`) — the actual product is green on mac: `rabbit-opt` linked, 40 libs staged, wheel built (45 MB), and all 9 sim tests passed.
+- **Root cause**: `test_binary_and_library_relocatability` branched `win32` vs *everything else*, so macOS ran the Linux ELF path and died on `FileNotFoundError: 'readelf'`. Test bug, not product bug.
+- **Fix**: new `darwin` branch using native `otool -L` (no hardcoded user/build dirs in linked paths) and `otool -l` (all RPATHs `@loader_path`-relative) plus relocated execution (copy binary + dylibs to an isolated dir with build env stripped, `--version` + real HEX8 solve + Exodus output) — the same three invariants as the Linux/Windows branches, expressed with platform tools. Deliberately no must-be-bundled assertion (can't distinguish legitimate shared MPI from leaks; isolated execution is the behavioral proof — same bar as the other branches).
+- **Files changed**: `test/test_simulations.py` (darwin branch only; win32/Linux paths byte-identical).
+- **Verification**: parser logic executed against realistic canned `otool` output (linked-lib tokenization incl. `@rpath`, LC_RPATH state machine incl. bad-path capture); `py_compile` + unit suite → 22 passed. Full proof is the mac PR round (test executes on the runner).
+- **Remaining uncertainty**: none on mechanism. (Also noted but out of scope: `install_name_tool` printed errors on two staged dylibs during packaging with `check=False` — staging completed anyway; the new RPATH assertions will confirm or deny final state.)
+
+## 2026-09-25 — macOS: `conf_vars.mk` never cached alongside `MooseConfig.h`
+
+- **CI run**: macOS `36171696370` (failed at 10m in `Build Rabbit`, `PNGOutput.h: fatal error: 'png.h'`) — warm caches, fresh `Configure MOOSE` skipped.
+- **Root cause**: only `MooseConfig.h` (the PNG on/off decision) is cached, never the generated `conf_vars.mk` that carries the matching `-I` flags (`libPNG_INCLUDE`). On cache-hit runs `-include` silently tolerates its absence, so even a correct `HAVE_LIBPNG=1` compiles with no png `-I`. Linux survives only because Ubuntu images ship `png.h` in default `/usr/include`. Proven: local `conf_vars.mk` exists purely as configure output; no workflow or script references it; the failing run restored the header and skipped configure.
+- **Fix**: (1) cache `moose/conf_vars.mk` with `MooseConfig.h` (restore+save) so decision and flags travel together; (2) new `check_cached_moose_config()` runs on every `configure_moose` — if the cached header claims PNG but the flags file is missing or points nowhere with `png.h`, both are deleted so configure re-runs fresh (self-healing against already-poisoned saves; prefix-fallback restores can't re-poison). PNG-disabled configs pass through untouched.
+- **Files changed**: `.github/workflows/macos_build_and_test.yml`, `scripts/build/darwin.py`, `test/test_darwin.py`.
+- **Verification**: 4 new unit tests (consistent/disabled/missing-vars/broken-flags); `pytest` → 22 passed.
+- **Remaining uncertainty**: none on mechanism. (Near-miss caught during edit: briefly wrote a `linux-` cache key into the macOS file — fixed before push; asymmetric key prefixes across OSes deserve a future lint.)
+
+## 2026-09-25 — macOS: libpng metadata without headers breaks MOOSE configure contract
+
+- **CI run**: macOS `36165248598` (failed at 10m in `Build Rabbit`; warm caches skipped all dep builds — libMesh+WASP+config previously proven green).
+- **Root cause**: MOOSE `configure.ac` defines `HAVE_LIBPNG` whenever `pkg-config --exists libpng` succeeds, recording only the `-I` flags it is given. On `macos-15` runners that check succeeds but the flags point nowhere with `png.h` (headers absent), so the guarded `#include <png.h>` in `PNGOutput.h` fails deep in the framework compile. Proven fresh (not stale cache): this run's `Configure MOOSE` re-ran after a cache miss.
+- **Fix, two parts**: (1) `brew install libpng` in the macOS workflow so detection finds real headers (keeps PNG feature parity with Linux instead of disabling it); (2) `check_libpng_consistency()` in `darwin.py::configure_moose` which raises with the exact cause when `-I` dirs lack `png.h`, warns when undecidable, and passes through when consistent. Part (2) matters structurally: it touches `darwin.py`, which is in every mac dep-cache key, so the stale `MooseConfig.h` (old `HAVE_LIBPNG=1`) is invalidated — a workflow-only change would have been silently ignored via cache hit. Also added the missing `moose_deps.txt` to all mac dep/wheel keys (consistency gap vs Linux/Windows).
+- **Files changed**: `.github/workflows/macos_build_and_test.yml`, `scripts/build/darwin.py`, `test/test_darwin.py`.
+- **Verification**: 4 new unit tests (absent/disabled, present+headers, present-without-headers raises) with mocked pkg-config; `pytest` → 18 passed; YAML parses.
+- **Remaining uncertainty**: which formula currently provides the broken `.pc` (irrelevant post-fix — consistent installs pass, anything else fails loudly).
+
+## 2026-09-25 — macOS: tinyhttp missing `#include <algorithm>`/`<functional>`
+
+- **CI run**: macOS `36165248598` (failed at 10m in `Build Rabbit` — fast because warm caches skipped all dep builds; notably libMesh+WASP+config all green on mac for the first time).
+- **Error**: `tinyhttp/http.h:186/200/384: no member named 'transform' / no template named 'function'` — header uses `std::transform`/`std::function` but includes neither. Same lean-libc++ class.
+- **Fix**: `patches/macos/tinyhttp.patch` (generated via `diff -u` after learning hand-written hunks risk malformation), wired into `apply_macos_patches()`; that helper is now also invoked from `build_rabbit.py::main()` behind `sys.platform == "darwin"` so framework-level headers are patched before the Rabbit compile on every macOS flow (stages run separately in CI).
+- **Files changed**: `patches/macos/tinyhttp.patch` (new), `scripts/build/darwin.py`, `build_rabbit.py` (darwin-gated call), `test/test_darwin.py`.
+- **Verification**: dry-run + scratch-copy apply + idempotence; `pytest` → 15 passed.
+- **Remaining uncertainty**: further lean-header TUs may surface in later rounds (same loop).
+
+## 2026-09-25 — macOS: WASP `Format.h` missing `#include <type_traits>`
+
+- **CI run**: macOS `36153829049` (failed at 1h7m in `Build WASP and HIT`, TU `waspexpr/ExprContext.cpp`) — libMesh incl. both prior patches built clean; failure moved into WASP.
+- **Error**: `waspcore/Format.h:216: error: no member named 'is_fundamental' in namespace 'std'` — the header uses `std::is_fundamental<T>::value` but includes only `<cmath> <string> <cstring> <sstream> <iostream> <iomanip> <stdio.h>`. Same lean-libc++ class.
+- **Fix**: `patches/macos/wasp.patch` (+ comment + `#include <type_traits>`, generated via `diff -u` after a hand-written hunk proved malformed), wired into the existing `apply_macos_patches()` table; that helper is now also called from `build_wasp` (WASP builds after libMesh, and CI invokes the stages separately).
+- **Files changed**: `patches/macos/wasp.patch` (new), `scripts/build/darwin.py`, `test/test_darwin.py` (apply + idempotence test).
+- **Verification**: dry-run + scratch-copy apply against pinned sources; `pytest` → 14 passed.
+- **Remaining uncertainty**: further lean-header TUs may surface in later rounds (same loop).
+
+## 2026-09-25 — macOS: libMesh `dof_object.h` missing `#include <iterator>`
+
+- **CI run**: macOS `36148836952` (failed at 40m in `Build libMesh`, TU `dof_map.C`) — the poly2tri fix held (contrib built clean; failure moved into libMesh proper).
+- **Error**: `include/libmesh/dof_object.h:511: error: no template named 'back_insert_iterator' in namespace 'std'` — the header uses `std::back_insert_iterator` but includes only `<cstddef> <cstring> <vector> <memory>`. Same lean-libc++ class as poly2tri.
+- **Deliberately not patched blindly**: a regex sweep over libMesh+contrib flagged ~200 headers, but most are false positives (umbrella includes, and TIMPI compiled clean despite being flagged). Patching on suspicion risks unmaintainable churn; each CI-proven (file, symbol, header) triple gets exactly one include. Pre-emptive sweeping rejected in favor of precise per-round fixes.
+- **Fix**: `patches/macos/libmesh.patch` (+ comment + `#include <iterator>`), wired into the existing `apply_macos_patches()` table (same idempotence contract).
+- **Verification**: dry-run + scratch-copy apply against pinned sources; `pytest` → 13 passed.
+- **Remaining uncertainty**: further lean-header TUs may surface in later rounds (same loop).
+
+## 2026-09-25 — macOS: poly2tri missing `#include <ostream>` (follow-up in libMesh)
+
+- **CI run**: macOS `36137283766` (failed at 1h38m in `Build libMesh`) — notably, the `--disable-netgen` fix worked (no Netgen errors anywhere; the build progressed over an hour past the old failure point).
+- **New error, single TU**: `contrib/poly2tri/.../common/shapes.h:122: error: no type named 'ostream' in namespace 'std'` — the header declares `std::ostream& operator<<` but includes only `<cmath> <cstddef> <stdexcept> <vector>`. Older libc++ provided `ostream` transitively; LLVM 23 does not. Grep-verified this is the only header in all of poly2tri using iostream facilities, so one include fixes the whole package (no whack-a-mole). MOOSE framework itself includes poly2tri (`BoundaryLayerUtils`, `MeshTriangulationUtils`, ...), so the patch applies unconditionally in `build_libmesh`, not only when rebuilding.
+- **Fix**: new `patches/macos/poly2tri.patch` (+4-line comment + `#include <ostream>`), applied idempotently via new `apply_macos_patches()` in `scripts/build/darwin.py` (exit 0 applied / 1 already-applied tolerated, >1 raises with output — same contract as the Windows patch steps, without their old `|| true` masking).
+- **Files changed**: `patches/macos/poly2tri.patch` (new), `scripts/build/darwin.py`, `test/test_darwin.py` (real apply-to-scratch-copy + idempotence test).
+- **Verification**: `patch -p1 --dry-run` + real apply on a scratch copy of the pinned `shapes.h` (local tree untouched); `pytest` → 12 passed.
+- **Remaining uncertainty**: whether further macOS-only contrib TUs hide behind this one (same loop as before — next CI round tells).
+
+## 2026-09-25 — Release: shared caches with build-and-test + 360 min timeouts
+
+- **Why the v2026.9.3 release rebuilt everything**: `release.yml` used its own cache namespace (`linux/windows-moose-build-*`, own wheel keys) that no prior run had ever populated — first tag = guaranteed cold full rebuild on both runners (~1h+), not a hang.
+- **Fix**: release jobs now restore the *exact* per-stage caches (same keys, paths, ids, restore-keys) as the build-and-test workflows and save nothing — build-and-test runs own population, releases consume. A release on a previously built tree restores everything and only runs tests + packaging; a cold release builds exactly as before. Applies to Linux (4 stages) and Windows (4 stages); wheel keys aligned too.
+- **Timeouts**: all jobs in all four workflow files set to 360 min (GitHub-hosted max), including release publish.
+- **Files changed**: `.github/workflows/{release,linux_build_and_test,windows_build_and_test,macos_build_and_test}.yml` (timeouts); `release.yml` (cache alignment, dropped release-side saves).
+- **Verification**: YAML parses; no dangling step-id references; all `if:` conditions resolve to existing step ids. Live proof requires the next tag/dispatch run.
+
+## 2026-09-25 — macOS: disable NetGen in libMesh build (SDK macro vs new libc++)
+
+- **CI runs**: macOS `36111456669` (33m), `36110525881` (44m), `36130962168` (32m) — all fail identically in the libMesh dependency stage (`update_and_rebuild_libmesh.sh --with-mpi`).
+- **Root cause**: libMesh's bundled NetGen `nglib` TU `gzstream.cpp` dies parsing Homebrew LLVM 23.1.0's libc++ `<complex>` (`expected unqualified-id` at `std::isnan`/`std::isinf` uses): the Xcode 16.4 SDK `math.h` defines `isnan`/`isinf`/`signbit` as function-like macros, which macro-expand the `std::`-qualified names during `<complex>` parsing. Only one TU fails today, but the poison (macro active before `<complex>`) is systemic to the NetGen build under this toolchain/SDK pairing. Verified the chain `gzstream.cpp` → `myadt.hpp` → `mydefs.hpp` → `ngcore.hpp` → `archive.hpp` → `<complex>`, and that NetGen pulls only `<cmath>` itself (no raw `<math.h>` to reorder).
+- **Why disable instead of patch/pin**: `--disable-netgen` is a documented libMesh configure option that flows untouched through MOOSE's `update_and_rebuild_libmesh.sh` (`"$@"` forwarding, verified in-script; neither MOOSE script mentions netgen). It removes the entire failure class rather than chasing SDK-macro whims TU-by-TU (patch) and avoids pinning a floating-then-deleted Homebrew LLVM formula (brittle in the other direction). MOOSE degrades gracefully: `Capabilities` reports netgen missing, `XYZDelaunayGenerator` errors only if used — and no Rabbit sim/test/example touches NetGen or Delaunay (grep-verified; Gmsh/generated/Exodus cover all packaged meshes).
+- **Platform considerations**: macOS-only file (`scripts/build/darwin.py`); Linux/Windows behavior byte-identical (no shared code touched).
+- **Files changed**: `scripts/build/darwin.py` (one flag + rationale comment), `test/test_darwin.py` (new: asserts `--disable-netgen` plumbed through, asserts built-install short-circuit).
+- **Verification**: flag proven real via `configure --help` on the exact pinned libmesh SHA (`90766057`, same on CI); `pytest test/test_darwin.py test/test_moose_pins.py test/test_staging.py` → 11 passed (mocked subprocess, no network/build); macOS CI on the new PR is the compile-level verifier.
+- **Remaining uncertainty**: none on mechanism; whether any *transitive* MOOSE consumer needs NetGen at macOS runtime will surface in the macOS test suite (expected clean — same suite as green Linux/Windows).
+
 ## 2026-09-25 — FIX-OWN-REGRESSION: verifier raised on dangling gitlinks
 
 - **What happened**: the `verify_moose_deps` shipped in the re-pin commit raised `RuntimeError: Cannot determine checked-out commit` whenever `git rev-parse` failed — including the *expected* cache-hit case, where `actions/cache` restores submodule content without its git dir (dangling `.git` gitlink). This red-blocked every Linux run on the re-pin commit within ~1 min (e.g. `36117932030`), and would have done the same on Windows via the ps1 hook.
