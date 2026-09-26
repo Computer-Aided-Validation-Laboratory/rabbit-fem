@@ -705,7 +705,7 @@ def run_tests(repo_dir: Path) -> None:
     """Run pytest suite against staged package."""
     print("--> Running pytest suite...")
     subprocess.run(
-        [find_python_exe(), "-m", "pytest", "test/test_simulations.py", "-v"],
+        [find_python_exe(), "-m", "pytest", "test/", "-v"],
         cwd=str(repo_dir),
         check=True,
     )

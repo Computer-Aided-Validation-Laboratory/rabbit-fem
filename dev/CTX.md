@@ -105,4 +105,6 @@ Optimise for correctness, portability and maintainability first. A green CI run 
 
 Make sure OS fixes are compartmentalised so that changes to one OS doesn't break the build for another.
 
+We are currently specifically debugging mac builds.
+
 While we are working set a 5 minute timer to check the CI and on first failure on any OS go through the process above and push a robust fix. Then set recurring 5 minute timers to check the CI repeatedly until the next failure on any OS. 

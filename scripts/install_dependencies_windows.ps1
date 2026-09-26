@@ -85,7 +85,7 @@ Write-Host "[OK] Python environment: $VenvPython" -ForegroundColor Green
 
 # 3. Install required Python packages
 Write-Host "[*] Installing Python build and test dependencies..." -ForegroundColor Yellow
-& uv pip install --python $VenvPython ziglang packaging pyyaml jinja2 pytest gmsh wheel
+& uv pip install --python $VenvPython ziglang packaging pyyaml jinja2 pytest gmsh wheel numpy netCDF4
 Write-Host "[OK] Python dependencies installed." -ForegroundColor Green
 
 # 4. Check Zig compiler
