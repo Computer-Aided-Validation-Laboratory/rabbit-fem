@@ -9,16 +9,26 @@ Packaged as a self-contained Python wheel (~60 MB), `rabbit-fem` provides a drop
 ## Key Features
 
 - **Focused Thermo-Mechanical Physics**: Preconfigured with `SolidMechanics`, `HeatTransfer`, `Contact`, `RayTracing`, and `ShiftedBoundaryMethod` modules.
-- **Self-Contained & Relocatable**: Bundles stripped ELF binaries and shared libraries linked via `$ORIGIN` with zero external MOOSE dependency at runtime.
+- **Self-Contained & Relocatable**: Ships stripped binaries and shared libraries with relocatable linkage (`$ORIGIN` RPATHs on Linux, `@loader_path` on macOS, fully static executable on Windows) and zero external MOOSE dependency at runtime.
 - **Drop-In CLI**: Execute MOOSE input files using `rabbit input.i` or `rabbit -i input.i`.
 - **Packaged Simulation Datasets**: Includes standard benchmarks and Gmsh geometry scripts accessible directly through Python.
-- **Zig Toolchain Orchestration**: Compiled and linked using `zig cc` / `zig c++` via `ziglang` and `build.zig`.
+- **Zig Toolchain Orchestration**: Compiled and linked using `zig cc` / `zig c++` via `ziglang`.
 
 ---
 
 ## Installation
 
-Install `rabbit-fem` directly from the standalone wheel:
+Install from PyPI:
+
+```bash
+# Using pip
+pip install rabbit-fem
+
+# Using uv
+uv pip install rabbit-fem
+```
+
+Or install a locally built wheel (see [Build from Source](#build-from-source)):
 
 ```bash
 # Using pip
@@ -28,6 +38,7 @@ pip install dist/rabbit_fem-*.whl
 uv pip install dist/rabbit_fem-*.whl
 ```
 
+Requires Python 3.10+ (CI builds and tests with Python 3.13).
 
 ---
 
@@ -45,7 +56,14 @@ rabbit -i $(python -c "from rabbit.sims import cube_thermomech_input_path, EElem
 rabbit simulation.i
 ```
 
-Run in parallel using OpenMPI:
+Useful flags (forwarded to the MOOSE application):
+
+```bash
+rabbit --version
+rabbit --help
+```
+
+Run in parallel using OpenMPI (Linux/macOS):
 
 ```bash
 mpirun -n 4 rabbit simulation.i
@@ -74,13 +92,13 @@ print("Simulation completed with return code:", result.returncode)
 
 ## Examples
 
-Runnable example scripts demonstrating Gmsh mesh generation and MOOSE simulation execution are located in [`src/rabbit/examples/`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/):
+Runnable example scripts demonstrating Gmsh mesh generation and MOOSE simulation execution are located in [`src/rabbit/examples/`](src/rabbit/examples/):
 
-- [`ex0_cube.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex0_cube.py) — 3D thermo-mechanical cube benchmark on structured HEX8 elements.
-- [`ex1_dogbone.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex1_dogbone.py) — 2D tensile dogbone mesh generation in Gmsh and linear elastic solve.
-- [`ex2_tensile_plate.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex2_tensile_plate.py) — 2D plate with a central hole mesh in Gmsh and elastic tension solve.
-- [`ex3_stc_thermal.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex3_stc_thermal.py) — 3D single thermal component (STC) with radiation and temperature-dependent conductivity.
-- [`ex4_monoblock_thermomech.py`](file:///home/lloydf/rabbit-fem/src/rabbit/examples/ex4_monoblock_thermomech.py) — 3D monoblock fusion component mesh generation and coupled thermo-mechanical solve.
+- [`ex0_cube.py`](src/rabbit/examples/ex0_cube.py) — 3D thermo-mechanical cube benchmark on structured HEX8 elements.
+- [`ex1_dogbone.py`](src/rabbit/examples/ex1_dogbone.py) — 2D tensile dogbone mesh generation in Gmsh and linear elastic solve.
+- [`ex2_tensile_plate.py`](src/rabbit/examples/ex2_tensile_plate.py) — 2D plate with a central hole mesh in Gmsh and elastic tension solve.
+- [`ex3_stc_thermal.py`](src/rabbit/examples/ex3_stc_thermal.py) — 3D single thermal component (STC) with radiation and temperature-dependent conductivity.
+- [`ex4_monoblock_thermomech.py`](src/rabbit/examples/ex4_monoblock_thermomech.py) — 3D monoblock fusion component mesh generation and coupled thermo-mechanical solve.
 
 Run any example with:
 
@@ -91,9 +109,99 @@ uv run python src/rabbit/examples/ex1_dogbone.py
 
 ---
 
+## Testing
+
+Run the full test suite from the repository root:
+
+```bash
+# Entire suite (unit, simulation, relocatability, gold regression)
+pytest test/ -v
+
+# Or via the build orchestrator (same suite)
+uv run python build_rabbit.py --test
+```
+
+The suite includes:
+
+- **Simulation tests** (`test/test_simulations.py`) — execute packaged benchmarks (cube, dogbone, plate) and verify Exodus output is produced.
+- **Relocatability tests** — verify the staged binary carries no hardcoded build-tree paths and runs from an isolated directory.
+- **Gold regression tests** (`test/test_cube_gold.py`) — run every `cube_thermomech_*` element case (HEX8/20/27, TET4/10/14) and compare mesh, nodal fields (temperature, displacement, strain), and postprocessors against committed snapshots in [`test/gold/`](test/gold/) within floating point tolerance. Field data is read with the minimal vendored Exodus II reader in [`src/rabbit/exodus.py`](src/rabbit/exodus.py).
+
+After an intentional physics change, regenerate the gold snapshots locally and commit the result:
+
+```bash
+PYTHONPATH=src python scripts/generate_cube_gold.py --force
+```
+
+Every CI build workflow additionally runs a **clean-venv smoke test** on the already-built wheel: it installs `dist/*.whl` into a fresh virtual environment outside the repo with build environment variables stripped, checks `rabbit --version`, audits linkage for missing libraries, and executes a real HEX8 solve. This catches missing bundled shared libraries that the build-tree test suite cannot see.
+
+---
+
 ## Build from Source
 
-`rabbit-fem` can be built from source on both **Linux** (Ubuntu 22.04+ or compatible) and **native Windows** (x86_64).
+### Overview
+
+`rabbit-fem` builds on **Linux** (Ubuntu 22.04+ or compatible), **native Windows** (x86_64), and **macOS** (Apple Silicon and Intel) using the Zig C/C++ compiler from `ziglang==0.16.0`. Compilation is split into five discrete, cacheable stages (also mirrored by the CI dependency caches):
+
+```mermaid
+flowchart TD
+    S1["Stage 1: PETSc<br/><code>--build-petsc</code>"] --> S2["Stage 2: libMesh<br/><code>--build-libmesh</code>"]
+    S2 --> S3["Stage 3: WASP & HIT<br/><code>--build-wasp</code>"]
+    S3 --> S4["Stage 4: MOOSE Config<br/><code>--configure-moose</code>"]
+    S4 --> S5["Stage 5: Rabbit & Wheel<br/><code>--wheel --test</code>"]
+```
+
+| OS | Build driver | Output wheel |
+|---|---|---|
+| Linux x86_64 | `build_rabbit.py` | `manylinux_2_38_x86_64` |
+| Windows x86_64 | `install_dependencies_windows.ps1` + `build_rabbit.py --wheel-only` | `win_amd64` |
+| macOS arm64 / x86_64 | `build_rabbit.py` | `macosx_14_0_arm64` / `macosx_13_0_x86_64` |
+
+Upstream MOOSE sources are pinned (`moose_version.txt` plus the `moose_deps.txt` lock for PETSc/libMesh/WASP) so rebuilds are reproducible.
+
+---
+
+### Linux Build & Testing
+
+#### Prerequisites (Linux)
+
+- **OS**: Linux x86_64 (Ubuntu 22.04+ or compatible)
+- **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`, `libtirpc-dev`, `libomp-dev`, `libglu1-mesa`
+- **Python**: Python 3.10+ with [`uv`](https://docs.astral.sh/uv/)
+
+```bash
+sudo apt-get update && sudo apt-get install -y \
+    build-essential gfortran libopenmpi-dev openmpi-bin patchelf libtirpc-dev libomp-dev libglu1-mesa
+
+# Set up Python environment
+uv venv .venv
+uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh numpy netCDF4
+```
+
+#### Step 1: Upstream MOOSE Dependencies
+
+Compile all dependencies at once:
+
+```bash
+uv run python build_rabbit.py --moose
+```
+
+Or execute individual stages independently:
+
+```bash
+uv run python build_rabbit.py --build-petsc
+uv run python build_rabbit.py --build-libmesh
+uv run python build_rabbit.py --build-wasp
+uv run python build_rabbit.py --configure-moose
+```
+
+#### Step 2: Build Rabbit, Stage Artifacts & Package Wheel
+
+Compiles RabbitApp with the Zig toolchain, strips symbols, rewrites RPATHs with `patchelf`, packages the `.whl` into `dist/`, and runs tests:
+
+```bash
+uv run python build_rabbit.py --wheel --test
+```
 
 ---
 
@@ -112,7 +220,7 @@ uv run python src/rabbit/examples/ex1_dogbone.py
 3. **MSYS2** (used strictly for Unix shell utilities and GNU Make needed by PETSc/libMesh/MOOSE configure and build scripts; compilation itself is handled by Zig):
    ```powershell
    winget install --id MSYS2.MSYS2 --source winget
-   C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make diffutils patch python m4 git
+   C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make diffutils patch python m4 git cmake
    ```
 
 #### 1-Step Automated Windows Build
@@ -125,7 +233,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps
 
 This script:
 - Creates and sets up `.venv` with `uv`.
-- Installs Python dependencies (`ziglang==0.16.0`, `packaging`, `pyyaml`, `jinja2`, `pytest`, `gmsh`).
+- Installs Python dependencies (`ziglang`, `packaging`, `pyyaml`, `jinja2`, `pytest`, `gmsh`, `wheel`, `numpy`, `netCDF4`).
 - Configures and builds **PETSc**, **libMesh**, **WASP**, and the **MOOSE** framework using the Zig C/C++ compiler.
 - Compiles and links `rabbit-opt.exe` with Heat Transfer, Solid Mechanics, Contact, Ray Tracing, and Shifted Boundary Method.
 - Stages `rabbit.exe` into `src/rabbit/bin/` and executes the simulation test suite.
@@ -136,7 +244,7 @@ Once the environment and binary are built, you can run the test suite in several
 
 1. **Using `uv run`** (Recommended):
    ```powershell
-   uv run pytest test/test_simulations.py -v
+   uv run pytest test/ -v
    ```
    or using the build script:
    ```powershell
@@ -146,7 +254,7 @@ Once the environment and binary are built, you can run the test suite in several
 2. **Using `.venv` directly**:
    ```powershell
    $env:PYTHONPATH = "src"
-   .\.venv\Scripts\python.exe -m pytest test/test_simulations.py -v
+   .\.venv\Scripts\python.exe -m pytest test/ -v
    ```
 
 #### Building the Standalone Windows Wheel
@@ -157,58 +265,55 @@ To package the staged executable into a distributable wheel:
 uv run python build_rabbit.py --wheel-only --test
 ```
 
-This generates `dist/rabbit_fem-2026.9.0-py3-none-win_amd64.whl` (~56 MB, fully self-contained).
+This generates `dist/rabbit_fem-*-py3-none-win_amd64.whl` (fully self-contained, ~56 MB).
+
+#### Windows PowerShell Stages
+
+`scripts/install_dependencies_windows.ps1` accepts the `-Stage` parameter:
+
+```powershell
+# Build individual stages
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage petsc
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage libmesh
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage wasp
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage moose
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage rabbit
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage test
+
+# Full pipeline
+powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage all
+```
 
 ---
 
-### Linux Build & Testing
+### macOS Build & Testing
 
-#### Prerequisites (Linux)
+#### Prerequisites (macOS)
 
-- **OS**: Linux x86_64 (Ubuntu 22.04+ or compatible)
-- **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`, `libtirpc-dev`, `libomp-dev`, `libglu1-mesa`
+- **OS**: macOS on Apple Silicon (arm64) or Intel (x86_64)
+- **Homebrew packages**: `open-mpi`, `gcc`, `llvm`, `libomp`, `libpng`, `hdf5-mpi`, `bison`, `flex`, `pkgconf`, `cmake`
 - **Python**: Python 3.10+ with [`uv`](https://docs.astral.sh/uv/)
 
 ```bash
-sudo apt-get update && sudo apt-get install -y \
-    build-essential gfortran libopenmpi-dev openmpi-bin patchelf libtirpc-dev libomp-dev libglu1-mesa
+brew install open-mpi gcc llvm libomp libpng hdf5-mpi bison flex pkgconf cmake
 
 # Set up Python environment
 uv venv .venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh numpy netCDF4
 ```
 
-#### Multi-Stage Build Architecture
+#### Build Stages
 
-`rabbit-fem` separates compilation into five discrete, cacheable stages:
+The macOS build follows the same five stages as Linux, driven by `build_rabbit.py` (macOS-specific compiler flags and portability patches live in `scripts/build/darwin.py` and `patches/macos/`):
 
-```mermaid
-flowchart TD
-    S1["Stage 1: PETSc<br/><code>--build-petsc</code>"] --> S2["Stage 2: libMesh<br/><code>--build-libmesh</code>"]
-    S2 --> S3["Stage 3: WASP & HIT<br/><code>--build-wasp</code>"]
-    S3 --> S4["Stage 4: MOOSE Config<br/><code>--configure-moose</code>"]
-    S4 --> S5["Stage 5: Rabbit & Wheel<br/><code>--wheel --test</code>"]
-```
-
-##### Step 1: Upstream MOOSE Dependencies
-You can compile all dependencies at once:
 ```bash
-uv run python build_rabbit.py --moose
-```
-Or execute individual stages independently:
-```bash
+# Individual stages
 uv run python build_rabbit.py --build-petsc
 uv run python build_rabbit.py --build-libmesh
 uv run python build_rabbit.py --build-wasp
 uv run python build_rabbit.py --configure-moose
-```
 
-##### Step 2: Build Rabbit, Stage Artifacts & Package Wheel
-
-Compiles RabbitApp with the Zig toolchain, strips symbols, rewrites RPATHs with `patchelf`, packages the `.whl` into `dist/`, and runs tests:
-
-```bash
+# Build Rabbit, package wheel, and test
 uv run python build_rabbit.py --wheel --test
 ```
 
@@ -227,35 +332,17 @@ uv run python build_rabbit.py --wheel --test
 | `[default]` | Compile Rabbit and stage relocatable binaries in `src/rabbit/` |
 | `--wheel` | Compile Rabbit, stage artifacts, and build wheel in `dist/` |
 | `--wheel-only` | Package existing staged artifacts into `dist/*.whl` without recompiling |
-| `--test` / `--tests` | Run pytest simulation and relocatability test suite |
+| `--test` / `--tests` | Run pytest simulation and relocatability test suite (`test/`) |
 | `--all` | Full pipeline: MOOSE build, Rabbit build, staging, wheel, and tests |
 
-#### Windows PowerShell Stages
-
-On Windows, `scripts/install_dependencies_windows.ps1` accepts the `-Stage` parameter:
-
-```powershell
-# Build individual stages
-powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage petsc
-powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage libmesh
-powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage wasp
-powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage moose
-powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage rabbit
-powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage test
-
-# Full pipeline
-powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -Stage all
-```
-
-Alternatively, you can trigger builds using the Zig build system:
+Alternatively, `zig build` delegates to the same orchestrator (`build.zig` runs `build_rabbit.py` with the default Rabbit build step):
 
 ```bash
 zig build
 ```
 
-
 ---
 
 ## License
 
-`rabbit-fem` is distributed under the GNU Lesser General Public License v2.1 (LGPL-2.1), matching the MOOSE framework license. See [`LICENSE`](file:///home/lloydf/rabbit-fem/LICENSE) for details.
+`rabbit-fem` is distributed under the GNU Lesser General Public License v2.1 (LGPL-2.1), matching the MOOSE framework license. See [`LICENSE`](LICENSE) for details.
