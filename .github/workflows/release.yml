@@ -55,7 +55,7 @@ jobs:
 
       - name: "Linux: Install Python build tools"
         run: |
-          uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh
+          uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh numpy netCDF4
 
       # Wheel and dependency caches use the exact same keys and paths as
       # linux_build_and_test.yml, so a release on a previously built tree

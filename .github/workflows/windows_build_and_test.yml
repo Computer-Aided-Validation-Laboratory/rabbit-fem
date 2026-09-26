@@ -179,6 +179,32 @@ jobs:
         run: |
           uv run python build_rabbit.py --test
 
+      # Smoke test the already-built wheel (restored from cache or built
+      # above) in a clean venv with build env vars stripped. No rebuild:
+      # this proves the wheel installs and solves on a machine without
+      # MOOSE/PETSc/libMesh checkouts.
+      - name: "Windows: Clean-venv smoke test of built wheel"
+        run: |
+          uv venv "$env:RUNNER_TEMP\rabbit-smoke"
+          $SmokePython = "$env:RUNNER_TEMP\rabbit-smoke\Scripts\python.exe"
+          $Wheel = (Get-ChildItem dist/*.whl | Select-Object -First 1).FullName
+          uv pip install --python $SmokePython $Wheel
+          Remove-Item Env:\MOOSE_DIR -ErrorAction SilentlyContinue
+          Remove-Item Env:\PETSC_DIR -ErrorAction SilentlyContinue
+          Remove-Item Env:\LIBMESH_DIR -ErrorAction SilentlyContinue
+          & "$env:RUNNER_TEMP\rabbit-smoke\Scripts\rabbit.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "Smoke rabbit --version failed" }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\rabbit-smoke-run" | Out-Null
+          Push-Location "$env:RUNNER_TEMP\rabbit-smoke-run"
+          try {
+            & $SmokePython -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Smoke solve OK')"
+            if ($LASTEXITCODE -ne 0) { throw "Smoke solve failed" }
+            Get-ChildItem *.e | ForEach-Object { Write-Host "Output: $($_.Name) ($($_.Length) bytes)" }
+            if (-not (Get-ChildItem *.e)) { throw "No Exodus output produced" }
+          } finally {
+            Pop-Location
+          }
+
       - name: "Windows: Save wheel cache"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

@@ -31,10 +31,15 @@ dependencies = [
 [project.optional-dependencies]
 test = [
     "pytest>=8.0.0",
+    "numpy>=1.24",
+    "netCDF4>=1.6",
 ]
 
 [project.scripts]
 rabbit = "rabbit.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rabbit"]
