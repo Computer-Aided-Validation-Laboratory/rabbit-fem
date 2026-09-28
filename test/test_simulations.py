@@ -353,7 +353,7 @@ def test_binary_and_library_relocatability(tmp_path: Path) -> None:
 
         input_path = cube_thermomech_input_path(EElemType.HEX8)
         res_solve = subprocess.run(
-            [str(isolated_bin), "-i", str(input_path)],
+            [str(isolated_bin), "-i", str(input_path), "Executioner/end_time=1", "-pc_type", "ilu"],
             env=clean_env,
             capture_output=True,
             text=True,

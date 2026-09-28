@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-28 — macOS isolated solve aborts: darwin test branch omits serial ILU override
+
+- **CI run**: macOS `36433969215` (SHA `35d577e`) — full product pipeline green for the first time on serial mac (cold PETSc with `--with-x=0`, libMesh link, WASP, MOOSE config, Rabbit, wheel), then `Run test suite` fails at 61 min: `test_binary_and_library_relocatability` (darwin step 3) — isolated solve returns `-6` (SIGABRT) seconds after isolated `--version` passes.
+- **Root cause**: test-harness inconsistency, proven locally. The HEX8 input requests `hypre boomeramg`; serial PETSc ships no Hypre, so the raw binary aborts with `PETSC ERROR: Unable to find requested PC type hypre`. Local repro on the serial `rabbit-opt`: without `-pc_type ilu` → abort (rc=134); with it → rc=0 plus Exodus output. Every other serial solve path already compensates — `run_rabbit` auto-injects `-pc_type ilu` (all 9 in-place sim tests pass through it) and the win32 isolated-solve branch carries `"Executioner/end_time=1", "-pc_type", "ilu"` — but the darwin branch invokes the relocated binary directly with bare `[-i, input]`, the only path missing both flags. (Missing `end_time=1` did not cause the abort — the abort was immediate — but the full-length solve would needlessly slow the test.)
+- **Fix**: darwin isolated solve now passes `"Executioner/end_time=1", "-pc_type", "ilu"`, byte-identical to the win32 invocation. Test-only change, darwin branch; win32/Linux branches untouched (Linux has no isolated solve).
+- **Files changed**: `test/test_simulations.py` (darwin step-3 invocation only), `dev/log_opencode_fixes.md`.
+- **Verification**: 71 unit tests pass; local serial binary aborts without / converges with the flag pair; live proof is the next mac round (step 3 solve). Next run also skips all dep stages (PETSc/libMesh/WASP/MooseConfig now cached under current keys), so ~15–20 min instead of 61.
+- **Remaining uncertainty**: none on mechanism.
+
 ## 2026-09-28 — Dep-cache prefix fallbacks silently keep stale trees (X11 fix never built)
 
 - **CI runs**: macOS `36429923149` (SHA `60a4ee1`, contains the `--with-x=0` fix) still fails at the libMesh link with `ld: library 'X11' not found`; the PETSc linklibs in its own log still carry `-lX11`. Linux `36429998002` on the same recipe went green.
