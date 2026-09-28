@@ -233,6 +233,10 @@ def _build_petsc_serial(
             "--with-mpi=0",
             "--with-shared-libraries=1",
             "--with-debugging=no",
+            # No X11 viewers in headless Rabbit solves; without this,
+            # PETSc records an unresolvable -lX11 in its link line that
+            # breaks every downstream libMesh/app link.
+            "--with-x=0",
             "--download-f2cblaslapack=1",
         ],
         cwd=str(petsc_dir),
