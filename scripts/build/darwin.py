@@ -88,50 +88,61 @@ def get_darwin_tool_env(
         tool_env["HDF5_DIR"] = hdf5_prefix
     else:
         tool_env.pop("HDF5_DIR", None)
-    hdf5_path = f"{hdf5_prefix}/bin:" if mpi else ""
     hdf5_lib = f"{hdf5_prefix}/lib:" if mpi else ""
     hdf5_pfx = f"{hdf5_prefix}:" if mpi else ""
     hdf5_inc = f"{hdf5_prefix}/include " if mpi else ""
+    # Serial builds must not discover ANY MPI-stack brew package, not just
+    # HDF5: with open-mpi visible, libMesh enables parallel netCDF support
+    # and compiles mpi.h into TUs that then clash with the serial build.
+    # Only the compiler-support prefixes stay on the search paths.
+    brew_path = f"{brew_prefix}/bin:" if mpi else ""
+    brew_lib = f"{brew_prefix}/lib:" if mpi else ""
+    brew_pfx = f"{brew_prefix}:" if mpi else ""
+    brew_inc = f"{brew_prefix}/include" if mpi else ""
     tool_env["PATH"] = (
         f"{bison_prefix}/bin:{flex_prefix}/bin:"
-        f"{llvm_prefix}/bin:{hdf5_path}{brew_prefix}/bin:"
+        f"{llvm_prefix}/bin:{brew_path}"
         + os.environ.get("PATH", "")
     )
     tool_env["CMAKE_LIBRARY_PATH"] = (
         f"{llvm_prefix}/lib:{omp_prefix}/lib:"
-        f"{hdf5_lib}{brew_prefix}/lib"
+        f"{hdf5_lib}{brew_lib}".rstrip(":")
     )
     tool_env["CMAKE_PREFIX_PATH"] = (
-        f"{llvm_prefix}:{omp_prefix}:{hdf5_pfx}{brew_prefix}:"
+        f"{llvm_prefix}:{omp_prefix}:{hdf5_pfx}{brew_pfx}".rstrip(":")
+        + ":"
         + os.environ.get("CMAKE_PREFIX_PATH", "")
     )
     tool_env["LIBRARY_PATH"] = (
         f"{llvm_prefix}/lib:{omp_prefix}/lib:"
-        f"{hdf5_lib}{brew_prefix}/lib:"
+        f"{hdf5_lib}{brew_lib}".rstrip(":")
+        + ":"
         + os.environ.get("LIBRARY_PATH", "")
     )
     tool_env["DYLD_LIBRARY_PATH"] = (
         f"{llvm_prefix}/lib:{omp_prefix}/lib:"
-        f"{hdf5_lib}{brew_prefix}/lib:"
+        f"{hdf5_lib}{brew_lib}".rstrip(":")
+        + ":"
         + os.environ.get("DYLD_LIBRARY_PATH", "")
     )
     tool_env["CPATH"] = (
         f"{llvm_prefix}/include:{omp_prefix}/include:"
-        f"{hdf5_inc}{brew_prefix}/include:"
+        f"{hdf5_inc}{brew_inc}".rstrip()
+        + ":"
         + os.environ.get("CPATH", "")
     )
     ldflags = (
         f"-L{llvm_prefix}/lib -Wl,-rpath,{llvm_prefix}/lib "
         f"-L{omp_prefix}/lib -Wl,-rpath,{omp_prefix}/lib "
         + (f"-L{hdf5_prefix}/lib -Wl,-rpath,{hdf5_prefix}/lib " if mpi else "")
-        + f"-L{brew_prefix}/lib "
+        + (f"-L{brew_prefix}/lib " if mpi else "")
         + os.environ.get("LDFLAGS", "")
     ).strip()
     tool_env["LDFLAGS"] = ldflags
     cppflags = (
         f"-I{llvm_prefix}/include -I{omp_prefix}/include "
         + (f"-I{hdf5_prefix}/include " if mpi else "")
-        + f"-I{brew_prefix}/include "
+        + (f"-I{brew_prefix}/include " if mpi else "")
         + os.environ.get("CPPFLAGS", "")
     ).strip()
     tool_env["CPPFLAGS"] = cppflags

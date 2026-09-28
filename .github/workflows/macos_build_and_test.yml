@@ -32,12 +32,10 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           brew install \
-            open-mpi \
             gcc \
             llvm \
             libomp \
             libpng \
-            hdf5-mpi \
             bison \
             flex \
             pkgconf \
