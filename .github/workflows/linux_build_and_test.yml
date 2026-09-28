@@ -66,6 +66,13 @@ jobs:
           key: rabbit-fem-wheel-Linux-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
       - name: "Linux: Restore PETSc cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
@@ -73,8 +80,6 @@ jobs:
         with:
           path: moose/petsc
           key: linux-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-serial-petsc-
 
       - name: "Linux: Build PETSc"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.petsc-cache.outputs.cache-hit != 'true'
@@ -96,8 +101,6 @@ jobs:
         with:
           path: moose/libmesh/installed
           key: linux-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-serial-libmesh-
 
       - name: "Linux: Build libMesh"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.libmesh-cache.outputs.cache-hit != 'true'
@@ -121,8 +124,6 @@ jobs:
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
           key: linux-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-serial-wasp-
 
       - name: "Linux: Build WASP and HIT"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.wasp-cache.outputs.cache-hit != 'true'
@@ -146,8 +147,6 @@ jobs:
         with:
           path: moose/framework/include/base/MooseConfig.h
           key: linux-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-serial-mooseconfig-
 
       - name: "Linux: Configure MOOSE"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'

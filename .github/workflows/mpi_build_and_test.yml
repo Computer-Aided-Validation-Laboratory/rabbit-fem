@@ -70,6 +70,13 @@ jobs:
             src/rabbit/share
           key: rabbit-fem-wheel-Linux-mpi-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
       - name: "MPI: Restore PETSc cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
@@ -77,8 +84,6 @@ jobs:
         with:
           path: moose/petsc
           key: linux-mpi-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-mpi-petsc-
 
       - name: "MPI: Build PETSc"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.petsc-cache.outputs.cache-hit != 'true'
@@ -101,8 +106,6 @@ jobs:
         with:
           path: moose/libmesh/installed
           key: linux-mpi-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-mpi-libmesh-
 
       - name: "MPI: Build libMesh"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.libmesh-cache.outputs.cache-hit != 'true'
@@ -127,8 +130,6 @@ jobs:
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
           key: linux-mpi-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-mpi-wasp-
 
       - name: "MPI: Build WASP and HIT"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.wasp-cache.outputs.cache-hit != 'true'
@@ -153,8 +154,6 @@ jobs:
         with:
           path: moose/framework/include/base/MooseConfig.h
           key: linux-mpi-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-mpi-mooseconfig-
 
       - name: "MPI: Configure MOOSE"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'

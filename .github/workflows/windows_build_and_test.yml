@@ -68,6 +68,13 @@ jobs:
           key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
 
       # --- Stage 1: PETSc Dependency ---
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
       - name: "Windows: Restore PETSc cache"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
@@ -75,8 +82,6 @@ jobs:
         with:
           path: moose/petsc/arch-windows-opt
           key: windows-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-petsc-
 
       - name: "Windows: Build PETSc"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.petsc-windows-cache.outputs.cache-hit != 'true'
@@ -98,8 +103,6 @@ jobs:
         with:
           path: moose/libmesh/installed
           key: windows-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-libmesh-
 
       - name: "Windows: Build libMesh"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.libmesh-windows-cache.outputs.cache-hit != 'true'
@@ -124,8 +127,6 @@ jobs:
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
           key: windows-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-wasp-
 
       - name: "Windows: Build WASP and HIT"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.wasp-windows-cache.outputs.cache-hit != 'true'
@@ -150,8 +151,6 @@ jobs:
         with:
           path: moose/framework/include/base/MooseConfig.h
           key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-mooseconfig-
 
       - name: "Windows: Configure MOOSE"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.mooseconfig-windows-cache.outputs.cache-hit != 'true'
