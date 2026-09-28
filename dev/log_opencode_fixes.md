@@ -1,5 +1,34 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-28 — macOS serial link: PETSc bakes unresolvable -lX11 (shared serial recipe)
+
+- **CI run**: macOS `36422829623` (PR #6) — serial libMesh link dies: `ld: library 'X11' not found`.
+- **Root cause**: my serial PETSc configure (both OSes) lets PETSc detect system X11 and record `-lX11` in `PETSC_WITH_EXTERNAL_LIB` with no resolving `-L`; the flag then poisons every downstream libMesh/app link. Verified in the local serial tree's `petscvariables`. Same latent issue exists in MPI PETSc (untouched — green everywhere, out of scope).
+- **Fix**: `--with-x=0` in both `_build_petsc_serial` functions (Linux + Darwin). Headless Rabbit solves never use X11 viewers; matches the Windows recipe, which already passes it. Deliberately shared code: the recipe is identical, and per-OS divergence here would just be two copies of one flag.
+- **CI cost note**: the flag change busts serial dep keys (correct — artifacts must rebuild) and, since MPI keys hash the same files, the MPI stack rebuilds once too despite unchanged MPI flags. One-time cost of file-granular cache keys.
+- **Files changed**: `scripts/build/{linux,darwin}.py`, `dev/log_opencode_fixes.md`.
+- **Verification**: unit suite green; live proof is the next mac round (libMesh link without `-lX11`).
+- **Remaining uncertainty**: none on mechanism.
+
+## 2026-09-28 — macOS serial finds MPI brew stack; OS isolation hardened
+
+- **CI run**: macOS `36416368229` (PR #6) — serial libMesh build dies in `exodusII_io_helper.C`: bundled `netcdf_par.h` pulls `/opt/homebrew/include/mpi.h`, whose declarations clash with the serial `typedef int MPI_Comm` fallback.
+- **Root cause**: two compounding causes. (1) The mac build env still installed `open-mpi`/`hdf5-mpi` and the serial `darwin.py` env kept the bare brew prefix on every search path, so serial libMesh configure discovered the MPI stack and enabled parallel-netCDF support a serial build must never see. Neutralising only HDF5 was insufficient. (2) Structural: nothing pinned per-OS build behaviour, so shared-file edits (the serial flip in `common.py`) broke other OSes silently — same story as the Linux `mpicc`/cache-key failure one round earlier.
+- **Fix**: mac build envs (`macos_build_and_test.yml`, release `build-macos`) no longer install `open-mpi`/`hdf5-mpi`; serial `get_darwin_tool_env` strips the bare brew prefix from all search paths (llvm/omp/bison/flex stay explicit); MPI-mode output verified byte-identical in shape to the pre-change env. New `test/test_build_env.py` pins each OS tool env per variant (Linux: mpicc vs direct wrappers; macOS: HDF5/MPI presence vs absence, including hostile ambient env) — editing one OS pipe now breaks its own test, not another OS's build.
+- **Platform considerations**: darwin.py + mac workflows only; Linux/Windows behaviour byte-identical (their tests prove it). The `darwin.py` touch busts the Linux/mac wheel keys (they hash `scripts/build/**`), so both rebuild the app stage once; dep caches are unaffected.
+- **Files changed**: `.github/workflows/{macos_build_and_test,release}.yml`, `scripts/build/darwin.py`, `test/test_build_env.py` (new), `dev/log_opencode_fixes.md`.
+- **Verification**: 55 unit tests pass (incl. hostile-env run); live proof is the next mac round (cold serial libMesh with no MPI in sight).
+- **Remaining uncertainty**: whether serial mac libMesh configure wants anything else the MPI stack used to provide (e.g. serial netcdf — bundled in contrib, expected fine); the build log decides.
+
+## 2026-09-28 — Windows: serial-patch unit test cannot spawn patch binary (scoped out)
+
+- **CI run**: Windows `36411602373` (PR #6) — `66 passed, 1 failed` in `Run test suite`: new `test_apply_serial_patches_idempotent` dies in `CreateProcess` with `WinError 2`, while the Darwin patch tests on the same runner (same `patch` lookup) pass.
+- **Root cause**: test-scope bug, exact spawn mechanism undetermined from here. Windows patching (including every serial fallback the Windows binary needs) is owned end-to-end by `install_dependencies_windows.ps1`, which applies unconditionally — `apply_serial_patches` is unreachable in all automated Windows flows, and the `patch` binary is only ever consumed on POSIX. The helper now resolves the binary via `shutil.which` (fail-fast `RuntimeError` instead of `WinError 2`), adds `-r -` parity with the proven Darwin invocation, and the `build_rabbit_binary` call site is gated to non-Windows; the unit test skips on win32 with that reason. No coverage lost where the code runs (Linux/macOS exercise it).
+- **Side effect to expect**: touching `scripts/build/common.py` busts the Windows wheel-cache key, so the next Windows run rebuilds fully (~40 min) instead of cache-hitting.
+- **Files changed**: `scripts/build/common.py`, `test/test_variant.py`, `dev/log_opencode_fixes.md`.
+- **Verification**: 45 unit tests pass locally; live proof is the next Windows round.
+- **Remaining uncertainty**: why `CreateProcess('patch', …)` fails while the Darwin tests spawn it fine on the same runner — moot for CI now, would only matter to a Windows dev hand-running `build_rabbit.py --wheel`, who gets the explicit error.
+
 ## 2026-09-28 — Serial/SMP default + rabbit-fem-mpi variant (feature build, verified locally)
 
 - **Goal**: default `rabbit-fem` MPI-free (SMP via `--n-threads`), opt-in `rabbit-fem-mpi` (Linux-only phase 1). `[mpi]` extras cannot swap binaries, so two PyPI distributions; `rabbit-fem-mpi` name verified available (PyPI 404), pending trusted publisher still to add.
