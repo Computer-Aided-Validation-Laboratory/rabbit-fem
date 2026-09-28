@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-28 — macOS wheel omits Homebrew libomp (dyld abort on clean machines)
+
+- **CI run**: macOS smoke `36442246527` (SHA `cf0bcfb`; build+tests green) — clean-venv `--version` dies: `dyld: Library not loaded: /opt/homebrew/opt/llvm/lib/libomp.dylib ... Abort trap: 6`.
+- **Root cause**: two layered defects in the shared staging code, both asymmetries with the Linux path. (1) `index_system_openmp_libs` early-returned on darwin, so the Linux fix that bundles the OpenMP runtime was never ported: the mac linker records the absolute brew path and nothing staged it. (2) The darwin branch of `find_needed_libraries` silently dropped unresolvable deps (no `unresolved_libs.add` like the Linux branch), so staging shipped the time-bomb instead of failing loudly; the smoke otool audit only forbids `/Users|/home|/tmp|/opt/moose`, so `/opt/homebrew` sailed through. Build-machine tests are blind to this (brew llvm is installed there) — same blind-spot class as the PyPI data-file bug.
+- **Fix**: `index_system_openmp_libs` now defaults per platform (`_DARWIN_OPENMP_PATTERNS` covers arm64+Intel prefixes × llvm+libomp providers; explicit `patterns` still overrides for tests), so `libomp.dylib` resolves, stages, and relinks to `@rpath` via the existing darwin relink — the serial wheel becomes genuinely self-contained, matching Linux (`libomp.so.5`) and the README claim. Darwin unresolved deps are now recorded, so `stage_artifacts` raises `FileNotFoundError` naming any future absolute brew dep instead of shipping it. Linux/Windows behavior unchanged (same Linux defaults/selection; win32 never exercises this path).
+- **CI cost note**: `common.py` is in the Linux-serial, Linux-MPI and macOS-serial dep keys, so all three cold-rebuild deps once (no fallback to blunt it — that is the point); Windows keys don't hash it. One-time cost for wheels that are actually relocatable.
+- **Files changed**: `scripts/build/common.py`, `test/test_staging.py` (old darwin early-return assertions replaced; 4 new tests incl. mocked-otool unresolved/resolved), `dev/log_opencode_fixes.md`.
+- **Verification**: 75 unit tests pass; `git diff --check` clean; live proof is the next mac round (staging must include `libomp.dylib`, smoke `--version` on a brew-less runner).
+- **Remaining uncertainty**: whether the serial mac binary carries further absolute brew deps behind libomp — the new loud failure names each one if so; dyld only reports the first missing lib.
+
 ## 2026-09-28 — macOS isolated solve aborts: darwin test branch omits serial ILU override
 
 - **CI run**: macOS `36433969215` (SHA `35d577e`) — full product pipeline green for the first time on serial mac (cold PETSc with `--with-x=0`, libMesh link, WASP, MOOSE config, Rabbit, wheel), then `Run test suite` fails at 61 min: `test_binary_and_library_relocatability` (darwin step 3) — isolated solve returns `-6` (SIGABRT) seconds after isolated `--version` passes.

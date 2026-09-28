@@ -446,6 +446,8 @@ def find_needed_libraries(
                             real_path = available_libs[soname].resolve()
                             resolved_libs[soname] = real_path
                             queue.append(real_path)
+                        else:
+                            unresolved_libs.add(soname)
             else:
                 cmd = ["readelf", "-d", str(current)]
                 res = subprocess.run(
@@ -507,23 +509,41 @@ _SYSTEM_OPENMP_PATTERNS = (
     "/opt/rocm-*/lib/llvm/lib-debug/libomp.so*",
 )
 
+# Homebrew OpenMP runtimes. The macOS linker records the absolute build
+# path (e.g. /opt/homebrew/opt/llvm/lib/libomp.dylib), which does not
+# exist on clean user machines, so the wheel must bundle it exactly like
+# Linux bundles libomp.so.5.
+_DARWIN_OPENMP_PATTERNS = (
+    "/opt/homebrew/opt/llvm/lib/libomp.dylib",
+    "/opt/homebrew/opt/libomp/lib/libomp.dylib",
+    "/usr/local/opt/llvm/lib/libomp.dylib",
+    "/usr/local/opt/libomp/lib/libomp.dylib",
+)
+
 
 def index_system_openmp_libs(
     available_libs: dict[str, Path],
-    patterns: tuple[str, ...] = _SYSTEM_OPENMP_PATTERNS,
+    patterns: tuple[str, ...] | None = None,
 ) -> None:
     """Index system OpenMP runtimes by filename for wheel staging.
 
-    The OpenMP runtime (e.g. libomp.so.5 from libomp-dev) lives outside the
-    repository, so its NEEDED entry cannot resolve from the source trees or
-    the binary RPATH. Record canonical locations keyed by exact filename so
-    resolution matches the binary's SONAME. Existing repository entries take
-    precedence and are never overridden.
+    The OpenMP runtime (e.g. libomp.so.5 from libomp-dev, libomp.dylib
+    from Homebrew llvm/libomp) lives outside the repository, so its
+    NEEDED entry cannot resolve from the source trees or the binary
+    RPATH. Record canonical locations keyed by exact filename so
+    resolution matches the binary's SONAME. Existing repository entries
+    take precedence and are never overridden. An explicit ``patterns``
+    argument overrides the platform default (used by tests to avoid
+    touching real system paths).
     """
     import glob
 
-    if sys.platform == "darwin":
-        return
+    if patterns is None:
+        patterns = (
+            _DARWIN_OPENMP_PATTERNS
+            if sys.platform == "darwin"
+            else _SYSTEM_OPENMP_PATTERNS
+        )
     for pattern in patterns:
         for candidate in sorted(glob.glob(pattern)):
             path = Path(candidate)
