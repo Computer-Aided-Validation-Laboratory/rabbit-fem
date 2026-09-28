@@ -337,7 +337,9 @@ def build_rabbit_binary(
         raise FileNotFoundError(
             f"MOOSE framework not found in {moose_dir}."
         )
-    if not is_mpi_build():
+    if not is_mpi_build() and sys.platform != "win32":
+        # Windows patching (including serial fallbacks) is owned by
+        # install_dependencies_windows.ps1, which applies unconditionally.
         apply_serial_patches(moose_dir, repo_dir)
 
     env = dict(os.environ)
@@ -585,8 +587,14 @@ def apply_serial_patches(moose_dir: Path, repo_dir: Path) -> None:
     patch_file = repo_dir / "patches" / "serial" / "moose.patch"
     if not patch_file.is_file():
         return
+    patch_bin = shutil.which("patch")
+    if patch_bin is None:
+        raise RuntimeError(
+            "Cannot apply serial MOOSE patches: the 'patch' utility was "
+            "not found on PATH."
+        )
     proc = subprocess.run(
-        ["patch", "-p1", "-N", "-i", str(patch_file)],
+        [patch_bin, "-p1", "-N", "-r", "-", "-i", str(patch_file)],
         cwd=str(moose_dir),
         capture_output=True,
         text=True,

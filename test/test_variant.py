@@ -231,6 +231,11 @@ def test_ensure_serial_mpi_fallback_skips_mpi(
     assert header.read_text(encoding="utf-8") == "// generated\n"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="serial MOOSE patches are POSIX-consumed; Windows patching "
+    "is owned by install_dependencies_windows.ps1",
+)
 def test_apply_serial_patches_idempotent(tmp_path: Path) -> None:
     """Patches apply to pristine sources and tolerate re-application."""
     import shutil
