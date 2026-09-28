@@ -87,7 +87,33 @@ def test_libmesh_disables_netgen(
     commands = _run_build_libmesh(tmp_path, monkeypatch)
     assert len(commands) == 1
     assert "--disable-netgen" in commands[0]
-    assert "--with-mpi" in commands[0]
+    assert "--disable-petsc-hypre-required" in commands[0]
+
+
+@pytest.mark.parametrize(
+    ("rabbit_mpi", "expected_flag", "unexpected_flag"),
+    [
+        (None, "--disable-petsc-hypre-required", "--with-mpi"),
+        ("0", "--disable-petsc-hypre-required", "--with-mpi"),
+        ("1", "--with-mpi", "--disable-petsc-hypre-required"),
+    ],
+)
+def test_libmesh_mpi_flag_follows_variant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rabbit_mpi: str | None,
+    expected_flag: str,
+    unexpected_flag: str,
+) -> None:
+    """The macOS libMesh MPI flags must follow the RABBIT_MPI variant."""
+    if rabbit_mpi is None:
+        monkeypatch.delenv("RABBIT_MPI", raising=False)
+    else:
+        monkeypatch.setenv("RABBIT_MPI", rabbit_mpi)
+    commands = _run_build_libmesh(tmp_path, monkeypatch)
+    assert len(commands) == 1
+    assert expected_flag in commands[0]
+    assert unexpected_flag not in commands[0]
 
 
 def test_libmesh_skipped_when_already_built(

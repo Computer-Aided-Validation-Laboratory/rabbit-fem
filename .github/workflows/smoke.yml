@@ -19,6 +19,11 @@ on:
         description: "Runner label for the smoke job"
         required: true
         type: string
+      mpi:
+        description: "Exercise mpirun (MPI wheel) instead of the SMP thread check"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   smoke:
@@ -43,30 +48,65 @@ jobs:
           name: ${{ inputs.artifact }}
           path: dist/
 
+      - name: "Smoke (macos): Install MPI runtime libraries"
+        if: inputs.platform == 'macos'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          # The wheel links Homebrew open-mpi/hdf5-mpi by design (left
+          # external like Linux's system MPI), so the runtimes must be
+          # present even for serial runs.
+          brew install open-mpi hdf5-mpi
+
       - name: "Smoke (linux/macos): Install wheel in clean venv and solve"
         if: inputs.platform != 'windows'
         run: |
+          if [ "${{ inputs.platform }}" = "linux" ]; then
+            # The wheel links system OpenMPI by design (MPI libs are
+            # excluded from staging; RPATH falls back to the system
+            # openmpi lib dir), so the runtime must be present even for
+            # serial runs.
+            sudo apt-get update
+            sudo apt-get install -y openmpi-bin
+          fi
           uv venv /tmp/rabbit-smoke
           uv pip install --python /tmp/rabbit-smoke/bin/python dist/*.whl
           SMOKE_BIN=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.cli import get_binary_path; print(get_binary_path())")
           echo "Smoke binary: $SMOKE_BIN"
-          env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/rabbit --version
           if [ "${{ inputs.platform }}" = "linux" ]; then
             if LD_LIBRARY_PATH= ldd "$SMOKE_BIN" | grep -q "not found"; then
               echo "::error::Wheel is missing shared libraries:"
               LD_LIBRARY_PATH= ldd "$SMOKE_BIN" | grep "not found"
               exit 1
             fi
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH /tmp/rabbit-smoke/bin/rabbit --version
           else
             if otool -L "$SMOKE_BIN" | grep -E "/Users/|/home/|/tmp/|/opt/moose" | grep -v "^$SMOKE_BIN"; then
               echo "::error::Wheel links hardcoded build-tree paths:"
               otool -L "$SMOKE_BIN"
               exit 1
             fi
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/rabbit --version
           fi
           mkdir -p /tmp/rabbit-smoke-run && cd /tmp/rabbit-smoke-run
           env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Smoke solve OK')"
           ls -la /tmp/rabbit-smoke-run/*.e
+          if [ "${{ inputs.mpi }}" = "true" ]; then
+            # MPI wheel: prove a real multi-rank run converges.
+            INPUT=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType; print(cube_thermomech_input_path(EElemType.HEX8))")
+            mkdir -p /tmp/rabbit-smoke-mpi-run && cd /tmp/rabbit-smoke-mpi-run
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH mpirun -n 2 "$SMOKE_BIN" -i "$INPUT" Executioner/end_time=1
+            ls -la /tmp/rabbit-smoke-mpi-run/*.e
+            echo "MPI smoke solve OK"
+          else
+            # Serial wheel: prove SMP threading parallelises. This step
+            # runs on Linux/macOS only (the whole step is skipped on
+            # Windows, whose libMesh builds with --with-thread-model=none).
+            mkdir -p /tmp/rabbit-smoke-smp-run && cd /tmp/rabbit-smoke-smp-run
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1', '--n-threads=2']); assert r.returncode == 0; print('SMP smoke solve OK')"
+            ls -la /tmp/rabbit-smoke-smp-run/*.e
+          fi
 
       - name: "Smoke (windows): Install wheel in clean venv and solve"
         if: inputs.platform == 'windows'

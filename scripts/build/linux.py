@@ -10,7 +10,9 @@ import sys
 from .common import (
     ensure_moose_repo,
     ensure_moose_submodules,
+    ensure_serial_mpi_fallback,
     find_python_exe,
+    is_mpi_build,
 )
 
 
@@ -174,10 +176,17 @@ def get_linux_tool_env(
 ) -> dict[str, str]:
     """Prepare environment variables for building Linux dependencies."""
     tool_env = dict(os.environ)
-    tool_env["OMPI_CC"] = str(zigcc_path)
-    tool_env["OMPI_CXX"] = str(zigcxx_path)
-    tool_env["CC"] = "mpicc"
-    tool_env["CXX"] = "mpicxx"
+    if is_mpi_build():
+        tool_env["OMPI_CC"] = str(zigcc_path)
+        tool_env["OMPI_CXX"] = str(zigcxx_path)
+        tool_env["CC"] = "mpicc"
+        tool_env["CXX"] = "mpicxx"
+    else:
+        # Serial/SMP variant: no MPI compiler wrappers anywhere. PETSc
+        # falls back to its MPIUNI stubs and libMesh builds serial with
+        # threading intact, so --n-threads keeps working.
+        tool_env["CC"] = str(zigcc_path)
+        tool_env["CXX"] = str(zigcxx_path)
     tool_env["CMAKE_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu"
     tool_env["CMAKE_PREFIX_PATH"] = (
         "/usr/lib/x86_64-linux-gnu:"
@@ -211,20 +220,75 @@ def build_petsc(
         petsc_env = get_linux_tool_env(zigcc_path, zigcxx_path)
         petsc_env.pop("PETSC_DIR", None)
         petsc_env.pop("PETSC_ARCH", None)
-        subprocess.run(
-            [
-                "./scripts/update_and_rebuild_petsc.sh",
-                "--skip-submodule-update",
-                "--CXXOPTFLAGS=-O3",
-                "--COPTFLAGS=-O3",
-                "--FOPTFLAGS=-O3",
-            ],
-            cwd=str(moose_dir),
-            env=petsc_env,
-            check=True,
-        )
+        if is_mpi_build():
+            subprocess.run(
+                [
+                    "./scripts/update_and_rebuild_petsc.sh",
+                    "--skip-submodule-update",
+                    "--CXXOPTFLAGS=-O3",
+                    "--COPTFLAGS=-O3",
+                    "--FOPTFLAGS=-O3",
+                ],
+                cwd=str(moose_dir),
+                env=petsc_env,
+                check=True,
+            )
+        else:
+            _build_petsc_serial(
+                moose_dir, zigcc_path, zigcxx_path, petsc_env
+            )
     else:
         print("[OK] PETSc already built.")
+
+
+def _build_petsc_serial(
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+    petsc_env: dict[str, str],
+) -> None:
+    """Configure and build serial (MPIUNI) PETSc directly.
+
+    MOOSE's update_and_rebuild_petsc.sh hardcodes --with-mpi=1 plus
+    MPI-only package downloads, so the serial stack configures PETSc
+    directly instead (same approach as the Windows build): no Fortran,
+    no MPI, shared libraries, minimal BLAS via f2cblaslapack.
+    """
+    print("--> Building serial PETSc (no MPI)...")
+    petsc_dir = moose_dir / "petsc"
+    env = dict(petsc_env)
+    env["PETSC_DIR"] = str(petsc_dir)
+    env["PETSC_ARCH"] = "arch-moose"
+    jobs = os.environ.get("MOOSE_JOBS", str(os.cpu_count() or 4))
+    subprocess.run(
+        [
+            "./configure",
+            "PETSC_ARCH=arch-moose",
+            f"--with-cc={zigcc_path}",
+            f"--with-cxx={zigcxx_path}",
+            "--with-fc=0",
+            "--with-fortran-bindings=0",
+            "--with-mpi=0",
+            "--with-shared-libraries=1",
+            "--with-debugging=no",
+            "--download-f2cblaslapack=1",
+        ],
+        cwd=str(petsc_dir),
+        env=env,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "make",
+            f"PETSC_DIR={petsc_dir}",
+            "PETSC_ARCH=arch-moose",
+            "all",
+            f"-j{jobs}",
+        ],
+        cwd=str(petsc_dir),
+        env=env,
+        check=True,
+    )
 
 
 def build_libmesh(
@@ -246,11 +310,19 @@ def build_libmesh(
         print("--> Building libMesh with Zig toolchain...")
         libmesh_env = get_linux_tool_env(zigcc_path, zigcxx_path)
         libmesh_env["METHODS"] = "opt"
+        # Serial PETSc has no Hypre, so the hard-coded
+        # --enable-petsc-hypre-required in MOOSE's configure_libmesh.sh
+        # must be overridden (later autoconf flags win). No --disable-mpi:
+        # libMesh unconditionally drops PETSc under that flag, while
+        # omitting it lets PETSc's MPIUNI stubs be detected and used
+        # (same approach as the Windows serial build).
+        mpi_args = (
+            ["--with-mpi"]
+            if is_mpi_build()
+            else ["--disable-petsc-hypre-required"]
+        )
         subprocess.run(
-            [
-                "./scripts/update_and_rebuild_libmesh.sh",
-                "--with-mpi",
-            ],
+            ["./scripts/update_and_rebuild_libmesh.sh", *mpi_args],
             cwd=str(moose_dir),
             env=libmesh_env,
             check=True,
@@ -304,6 +376,7 @@ def configure_moose(
         )
     else:
         print("[OK] MOOSE framework already configured.")
+    ensure_serial_mpi_fallback(moose_dir)
 
 
 def build_linux_dependencies(

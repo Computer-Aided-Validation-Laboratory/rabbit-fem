@@ -139,6 +139,129 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  build-mpi:
+    name: "MPI: Build and Verify Wheel"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: "MPI: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: "MPI: Install system packages"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            gfortran \
+            libopenmpi-dev \
+            openmpi-bin \
+            patchelf \
+            libtirpc-dev \
+            libomp-dev \
+            libglu1-mesa
+
+      - name: "MPI: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "MPI: Set up Python"
+        run: |
+          uv python install 3.13
+          uv venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: "MPI: Install Python build tools"
+        run: |
+          uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh numpy netCDF4
+
+      # MPI caches use the exact same -mpi suffixed keys as
+      # mpi_build_and_test.yml. Restore-only; that workflow owns population.
+      - name: "MPI: Restore wheel cache"
+        uses: actions/cache/restore@v4
+        id: wheel-cache
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/lib
+            src/rabbit/share
+          key: rabbit-fem-wheel-Linux-mpi-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+
+      - name: "MPI: Restore PETSc cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: petsc-cache
+        with:
+          path: moose/petsc
+          key: linux-mpi-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            linux-mpi-petsc-
+
+      - name: "MPI: Restore libMesh cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: libmesh-cache
+        with:
+          path: moose/libmesh/installed
+          key: linux-mpi-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            linux-mpi-libmesh-
+
+      - name: "MPI: Restore WASP cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: wasp-cache
+        with:
+          path: |
+            moose/framework/contrib/wasp/install
+            moose/framework/contrib/hit
+          key: linux-mpi-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            linux-mpi-wasp-
+
+      - name: "MPI: Restore MOOSE Config cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mooseconfig-cache
+        with:
+          path: moose/framework/include/base/MooseConfig.h
+          key: linux-mpi-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          restore-keys: |
+            linux-mpi-mooseconfig-
+
+      - name: "MPI: Build MOOSE dependencies"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
+        run: |
+          uv run python build_rabbit.py --moose
+
+      - name: "MPI: Build Rabbit, stage artifacts, and build wheel"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
+        run: |
+          uv run python build_rabbit.py --wheel
+
+      - name: "MPI: Run test suite"
+        env:
+          RABBIT_MPI: "1"
+        run: |
+          uv run python build_rabbit.py --test
+
+      - name: "MPI: Upload wheel artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rabbit-fem-mpi-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
   build-windows:
     name: "Windows: Build and Verify Wheel"
     runs-on: windows-latest
@@ -427,9 +550,19 @@ jobs:
       artifact: rabbit-fem-macos-wheel
       runner: macos-15
 
+  smoke-mpi:
+    name: "MPI: Clean-machine smoke test"
+    needs: build-mpi
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: linux
+      artifact: rabbit-fem-mpi-wheel
+      runner: ubuntu-24.04
+      mpi: true
+
   publish:
     name: "Publish Consolidated Release to PyPI"
-    needs: [build-linux, build-windows, build-macos, smoke-linux, smoke-windows, smoke-macos]
+    needs: [build-linux, build-windows, build-macos, build-mpi, smoke-linux, smoke-windows, smoke-macos, smoke-mpi]
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     environment:
@@ -467,7 +600,8 @@ jobs:
           linux_count=$(ls dist/*manylinux*.whl 2>/dev/null | wc -l)
           win_count=$(ls dist/*win_amd64.whl 2>/dev/null | wc -l)
           mac_count=$(ls dist/*macosx*.whl 2>/dev/null | wc -l)
-          echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s) and $mac_count macOS wheel(s)."
+          mpi_count=$(ls dist/rabbit-fem-mpi-*.whl 2>/dev/null | wc -l)
+          echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s), $mac_count macOS wheel(s) and $mpi_count MPI wheel(s)."
           if [ "$linux_count" -lt 1 ]; then
             echo "::error::Missing Linux manylinux wheel in dist/!"
             exit 1
@@ -478,6 +612,10 @@ jobs:
           fi
           if [ "$mac_count" -lt 1 ]; then
             echo "::error::Missing macOS macosx wheel in dist/!"
+            exit 1
+          fi
+          if [ "$mpi_count" -lt 1 ]; then
+            echo "::error::Missing rabbit-fem-mpi wheel in dist/!"
             exit 1
           fi
           echo "All platform wheels verified successfully."

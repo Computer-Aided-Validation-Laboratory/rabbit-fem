@@ -43,6 +43,38 @@ def get_library_dir() -> Path:
     return base_dir / "lib"
 
 
+def _variant_marker_path() -> Path:
+    """Path of the build-variant marker written at staging time."""
+    return Path(__file__).resolve().parent / "variant.txt"
+
+
+def is_mpi_binary() -> bool:
+    """Whether the packaged binary was built with MPI support.
+
+    Reads the ``variant.txt`` marker written at staging time (``mpi`` or
+    ``serial``). Wheels built before the marker existed predate the serial
+    variant: those are MPI builds everywhere except Windows, which has
+    always been serial.
+    """
+    try:
+        marker = _variant_marker_path().read_text(encoding="utf-8")
+    except OSError:
+        return sys.platform != "win32"
+    return marker.strip().lower() == "mpi"
+
+
+def mpi_launch_size() -> int:
+    """Number of MPI ranks in the current launch, or 1 when serial."""
+    for var in ("OMPI_COMM_WORLD_SIZE", "PMI_SIZE"):
+        try:
+            size = int(os.environ.get(var, "1"))
+        except ValueError:
+            continue
+        if size > 1:
+            return size
+    return 1
+
+
 def format_cli_args(raw_args: list[str]) -> list[str]:
     """Normalize CLI arguments, adding -i if a .i file is passed directly."""
     has_input_flag = any(arg in ("-i", "--input") for arg in raw_args)
@@ -60,7 +92,9 @@ def format_cli_args(raw_args: list[str]) -> list[str]:
                 formatted.append(arg)
 
     info_flags = ("-h", "--help", "-v", "--version", "--docs", "--show-capabilities", "--registry")
-    if sys.platform == "win32" and not any(arg in info_flags for arg in raw_args) and not any("-pc_type" in arg for arg in formatted):
+    # Serial builds (PETSc MPIUNI) have no Hypre: the packaged .i files
+    # request 'hypre boomeramg', so fall back to ILU unless overridden.
+    if not is_mpi_binary() and not any(arg in info_flags for arg in raw_args) and not any("-pc_type" in arg for arg in formatted):
         formatted.extend(["-pc_type", "ilu"])
 
     return formatted
@@ -73,6 +107,17 @@ def main() -> None:
     except FileNotFoundError as err:
         sys.stderr.write(f"Error: {err}\n")
         sys.exit(1)
+
+    size = mpi_launch_size()
+    if size > 1 and not is_mpi_binary():
+        sys.stderr.write(
+            f"Error: launched with {size} MPI ranks but this rabbit "
+            "binary is the serial/SMP build, which cannot run multi-rank "
+            "jobs (ranks would silently compute independent serial "
+            "solves). Install the MPI variant instead: "
+            "pip install rabbit-fem-mpi\n"
+        )
+        sys.exit(2)
 
     lib_dir = get_library_dir()
     env = dict(os.environ)

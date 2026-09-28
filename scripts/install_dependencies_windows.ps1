@@ -474,6 +474,11 @@ if ($Stage -in @("all", "rabbit")) {
         Copy-Item $DataSrc $DataDest -Recurse -Force
         Write-Host "[OK] Staged data files to $DataDest" -ForegroundColor Green
     }
+
+    # The Windows binary is always the serial/SMP variant (PETSc MPIUNI):
+    # record it so the CLI applies serial defaults (e.g. ILU fallback).
+    Set-Content -Path (Join-Path $RepoRoot "src\rabbit\variant.txt") -Value "serial"
+    Write-Host "[OK] Staged variant marker (serial)." -ForegroundColor Green
 }
 
 # 12. Run Verification Tests

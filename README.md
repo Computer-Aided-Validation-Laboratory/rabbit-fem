@@ -40,6 +40,31 @@ uv pip install dist/rabbit_fem-*.whl
 
 Requires Python 3.10+ (CI builds and tests with Python 3.13).
 
+### Serial and MPI variants
+
+The default `rabbit-fem` wheel is a serial/SMP build: it needs no
+system MPI installation and parallelises on one machine with
+`rabbit simulation.i --n-threads=N`. Only one variant may be installed
+at a time.
+
+For multi-rank runs, install the MPI variant instead (Linux only):
+
+```bash
+pip install rabbit-fem-mpi
+```
+
+```bash
+mpirun -n 4 rabbit simulation.i
+```
+
+### Runtime system requirements
+
+The serial wheel is fully self-contained on all platforms. The MPI
+variant links the MPI ecosystem at runtime, which must be installed
+separately (the launcher version must match the runtime):
+
+- **Linux (MPI variant)**: OpenMPI runtime — `sudo apt-get install -y openmpi-bin`
+
 ---
 
 ## Usage
@@ -63,7 +88,14 @@ rabbit --version
 rabbit --help
 ```
 
-Run in parallel using OpenMPI (Linux/macOS):
+Parallelise on one machine with shared-memory threads (serial wheel,
+Linux/macOS):
+
+```bash
+rabbit simulation.i --n-threads=4
+```
+
+Run multi-rank with the MPI variant (Linux only, see above):
 
 ```bash
 mpirun -n 4 rabbit simulation.i
@@ -334,6 +366,8 @@ uv run python build_rabbit.py --wheel --test
 | `--wheel-only` | Package existing staged artifacts into `dist/*.whl` without recompiling |
 | `--test` / `--tests` | Run pytest simulation and relocatability test suite (`test/`) |
 | `--all` | Full pipeline: MOOSE build, Rabbit build, staging, wheel, and tests |
+| `--mpi` | Build the MPI variant (produces the `rabbit-fem-mpi` wheel) |
+| `--no-mpi` | Build the serial/SMP variant (default) |
 
 Alternatively, `zig build` delegates to the same orchestrator (`build.zig` runs `build_rabbit.py` with the default Rabbit build step):
 

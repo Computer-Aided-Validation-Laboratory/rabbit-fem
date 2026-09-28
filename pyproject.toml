@@ -47,6 +47,7 @@ artifacts = [
     "src/rabbit/bin/*",
     "src/rabbit/lib/*",
     "src/rabbit/share/**/*",
+    "src/rabbit/variant.txt",
 ]
 
 [tool.hatch.build.targets.sdist]

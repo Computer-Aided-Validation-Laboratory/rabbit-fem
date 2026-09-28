@@ -14,6 +14,17 @@ def find_python_exe() -> str:
     return sys.executable
 
 
+def is_mpi_build() -> bool:
+    """Whether the MPI (multi-rank) variant is being built.
+
+    Selected by the ``RABBIT_MPI`` environment variable (``"1"`` for the
+    ``rabbit-fem-mpi`` wheel) or the ``--mpi`` / ``--no-mpi`` flags of
+    ``build_rabbit.py``, which set it. The default is the serial/SMP
+    ``rabbit-fem`` wheel, which needs no system MPI installation.
+    """
+    return os.environ.get("RABBIT_MPI", "0") == "1"
+
+
 def get_moose_dir(
     repo_dir: Path, custom_path: str | None = None
 ) -> Path:
@@ -326,16 +337,22 @@ def build_rabbit_binary(
         raise FileNotFoundError(
             f"MOOSE framework not found in {moose_dir}."
         )
+    if not is_mpi_build():
+        apply_serial_patches(moose_dir, repo_dir)
 
     env = dict(os.environ)
     env["PATH"] = f"{repo_dir / '.venv' / 'bin'}:{env.get('PATH', '')}"
     env["PYTHONNOUSERSITE"] = "1"
     env["MOOSE_DIR"] = str(moose_dir)
     env["METHODS"] = "opt"
-    env["OMPI_CC"] = str(zigcc_path)
-    env["OMPI_CXX"] = str(zigcxx_path)
-    env["CC"] = "mpicc"
-    env["CXX"] = "mpicxx"
+    if is_mpi_build():
+        env["OMPI_CC"] = str(zigcc_path)
+        env["OMPI_CXX"] = str(zigcxx_path)
+        env["CC"] = "mpicc"
+        env["CXX"] = "mpicxx"
+    else:
+        env["CC"] = str(zigcc_path)
+        env["CXX"] = str(zigcxx_path)
 
     jobs = os.environ.get("MOOSE_JOBS", str(os.cpu_count() or 4))
     cmd = ["make", f"-j{jobs}"]
@@ -512,6 +529,77 @@ def index_system_openmp_libs(
                 available_libs[path.name] = path
 
 
+_SERIAL_MPI_FALLBACK_MARKER = "Rabbit serial/SMP build"
+
+
+def ensure_serial_mpi_fallback(moose_dir: Path) -> None:
+    """Provide MPI_Comm fallback types for serial MOOSE builds.
+
+    ``Moose.h`` uses ``MPI_Comm`` without a guard while PETSc MPIUNI's
+    ``mpi.h`` is not on the include path, so serial compiles fail with
+    ``unknown type name 'MPI_Comm'``. Append the same fallback the
+    Windows port uses to the generated ``MooseConfig.h`` (reached via
+    ``MooseDefaultConfig.h``). Idempotent: skipped once applied, so
+    re-running configure or builds never duplicates it. Serial builds
+    only; MPI builds must never see this.
+    """
+    if is_mpi_build():
+        return
+    moose_cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    if not moose_cfg.is_file():
+        raise FileNotFoundError(
+            f"MOOSE is not configured in {moose_dir}; cannot apply the "
+            "serial MPI fallback."
+        )
+    content = moose_cfg.read_text(encoding="utf-8")
+    if _SERIAL_MPI_FALLBACK_MARKER in content:
+        return
+    moose_cfg.write_text(
+        content
+        + (
+            "\n/* Rabbit serial/SMP build (no MPI): Moose.h uses MPI_Comm\n"
+            "   without a guard while PETSc MPIUNI's mpi.h is not on the\n"
+            "   include path. Same fallback as the Windows port. */\n"
+            "#ifndef LIBMESH_HAVE_MPI\n"
+            "typedef int MPI_Comm;\n"
+            "#ifndef MPI_COMM_WORLD\n"
+            "#define MPI_COMM_WORLD 0\n"
+            "#endif\n"
+            "#endif\n"
+        ),
+        encoding="utf-8",
+    )
+    print(f"Applied serial MPI fallback to {moose_cfg}")
+
+
+def apply_serial_patches(moose_dir: Path, repo_dir: Path) -> None:
+    """Apply serial-build portability patches to MOOSE sources.
+
+    Serial (MPIUNI) builds hit upstream code paths that assume MPI is
+    present (e.g. unguarded ``#include <mpi.h>``); each is guarded on
+    ``LIBMESH_HAVE_MPI`` instead, mirroring the Windows port approach.
+    Idempotent: already-applied patches are skipped, genuine failures
+    raise. Serial builds only; shared by all OSes because the guarded
+    code is MPI-conditional, not OS-conditional.
+    """
+    patch_file = repo_dir / "patches" / "serial" / "moose.patch"
+    if not patch_file.is_file():
+        return
+    proc = subprocess.run(
+        ["patch", "-p1", "-N", "-i", str(patch_file)],
+        cwd=str(moose_dir),
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode in (0, 1):
+        applied = "applied" if proc.returncode == 0 else "already applied"
+        print(f"Serial MOOSE patch {applied}.")
+    else:
+        raise RuntimeError(
+            f"Applying serial MOOSE patch failed:\n{proc.stdout}\n{proc.stderr}"
+        )
+
+
 def stage_moose_data(repo_dir: Path, moose_dir: Path) -> None:
     """Stage MOOSE runtime data files into src/rabbit/share.
 
@@ -537,6 +625,15 @@ def stage_moose_data(repo_dir: Path, moose_dir: Path) -> None:
         if data_dest.is_dir():
             shutil.rmtree(data_dest)
         shutil.copytree(data_src, data_dest)
+
+    # Record which binary variant was staged so the runtime CLI can adapt
+    # (preconditioner defaults, multi-rank misuse guard). Read by
+    # rabbit.cli.is_mpi_binary(); wheels built before this marker fall back
+    # to platform inference there.
+    variant_marker = repo_dir / "src" / "rabbit" / "variant.txt"
+    variant_marker.write_text(
+        "mpi\n" if is_mpi_build() else "serial\n", encoding="utf-8"
+    )
 
 
 def stage_artifacts(
@@ -647,8 +744,35 @@ def stage_artifacts(
 
 
 def build_wheel(repo_dir: Path) -> Path:
-    """Build standalone Python wheel package and tag appropriately."""
+    """Build standalone Python wheel package and tag appropriately.
+
+    The MPI variant is published under the ``rabbit-fem-mpi`` project
+    name; the default serial/SMP build keeps ``rabbit-fem``.
+    """
     print("--> Building standalone wheel package...")
+    pyproject_file = repo_dir / "pyproject.toml"
+    original_pyproject = pyproject_file.read_text(encoding="utf-8")
+    renamed = False
+    if is_mpi_build():
+        renamed_text = original_pyproject.replace(
+            'name = "rabbit-fem"', 'name = "rabbit-fem-mpi"', 1
+        )
+        if renamed_text == original_pyproject:
+            raise RuntimeError(
+                "Cannot build MPI wheel: project name not found in "
+                f"{pyproject_file}."
+            )
+        pyproject_file.write_text(renamed_text, encoding="utf-8")
+        renamed = True
+    try:
+        return _build_wheel_inner(repo_dir)
+    finally:
+        if renamed:
+            pyproject_file.write_text(original_pyproject, encoding="utf-8")
+
+
+def _build_wheel_inner(repo_dir: Path) -> Path:
+    """Run the hatch build and retag the wheel for the host platform."""
     uv_bin = shutil.which("uv")
     if uv_bin:
         cmd = ["uv", "build", "--wheel"]

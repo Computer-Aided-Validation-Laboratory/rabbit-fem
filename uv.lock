@@ -667,7 +667,7 @@ wheels = [
 
 [[package]]
 name = "rabbit-fem"
-version = "2026.9.5"
+version = "2026.9.6"
 source = { editable = "." }
 dependencies = [
     { name = "gmsh" },

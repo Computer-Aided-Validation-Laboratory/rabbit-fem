@@ -10,6 +10,8 @@ import sys
 from .common import (
     ensure_moose_repo,
     ensure_moose_submodules,
+    ensure_serial_mpi_fallback,
+    is_mpi_build,
 )
 
 
@@ -57,60 +59,79 @@ def get_darwin_tool_env(
 ) -> dict[str, str]:
     """Prepare environment variables for building macOS dependencies."""
     tool_env = dict(os.environ)
-    tool_env["OMPI_CC"] = str(zigcc_path)
-    tool_env["OMPI_CXX"] = str(zigcxx_path)
-    tool_env["CC"] = "mpicc"
-    tool_env["CXX"] = "mpicxx"
+    mpi = is_mpi_build()
+    if mpi:
+        tool_env["OMPI_CC"] = str(zigcc_path)
+        tool_env["OMPI_CXX"] = str(zigcxx_path)
+        tool_env["CC"] = "mpicc"
+        tool_env["CXX"] = "mpicxx"
+    else:
+        # Serial/SMP variant: no MPI compiler wrappers; threading stays
+        # intact so --n-threads keeps working.
+        tool_env["CC"] = str(zigcc_path)
+        tool_env["CXX"] = str(zigcxx_path)
 
     brew_prefix = (
         "/opt/homebrew" if Path("/opt/homebrew").is_dir() else "/usr/local"
     )
     llvm_prefix = f"{brew_prefix}/opt/llvm"
     omp_prefix = f"{brew_prefix}/opt/libomp"
-    hdf5_prefix = f"{brew_prefix}/opt/hdf5-mpi"
+    # The serial/SMP variant must not see the MPI-stack HDF5: PETSc would
+    # otherwise link Homebrew hdf5-mpi (absolute load commands), forcing
+    # every user machine to carry those formulae. Serial PETSc builds
+    # without HDF5, matching the Windows recipe.
+    hdf5_prefix = f"{brew_prefix}/opt/hdf5-mpi" if mpi else ""
     bison_prefix = f"{brew_prefix}/opt/bison"
     flex_prefix = f"{brew_prefix}/opt/flex"
 
-    tool_env["HDF5_DIR"] = hdf5_prefix
+    if mpi:
+        tool_env["HDF5_DIR"] = hdf5_prefix
+    else:
+        tool_env.pop("HDF5_DIR", None)
+    hdf5_path = f"{hdf5_prefix}/bin:" if mpi else ""
+    hdf5_lib = f"{hdf5_prefix}/lib:" if mpi else ""
+    hdf5_pfx = f"{hdf5_prefix}:" if mpi else ""
+    hdf5_inc = f"{hdf5_prefix}/include " if mpi else ""
     tool_env["PATH"] = (
         f"{bison_prefix}/bin:{flex_prefix}/bin:"
-        f"{llvm_prefix}/bin:{brew_prefix}/bin:"
+        f"{llvm_prefix}/bin:{hdf5_path}{brew_prefix}/bin:"
         + os.environ.get("PATH", "")
     )
     tool_env["CMAKE_LIBRARY_PATH"] = (
         f"{llvm_prefix}/lib:{omp_prefix}/lib:"
-        f"{hdf5_prefix}/lib:{brew_prefix}/lib"
+        f"{hdf5_lib}{brew_prefix}/lib"
     )
     tool_env["CMAKE_PREFIX_PATH"] = (
-        f"{llvm_prefix}:{omp_prefix}:{hdf5_prefix}:{brew_prefix}:"
+        f"{llvm_prefix}:{omp_prefix}:{hdf5_pfx}{brew_prefix}:"
         + os.environ.get("CMAKE_PREFIX_PATH", "")
     )
     tool_env["LIBRARY_PATH"] = (
         f"{llvm_prefix}/lib:{omp_prefix}/lib:"
-        f"{hdf5_prefix}/lib:{brew_prefix}/lib:"
+        f"{hdf5_lib}{brew_prefix}/lib:"
         + os.environ.get("LIBRARY_PATH", "")
     )
     tool_env["DYLD_LIBRARY_PATH"] = (
         f"{llvm_prefix}/lib:{omp_prefix}/lib:"
-        f"{hdf5_prefix}/lib:{brew_prefix}/lib:"
+        f"{hdf5_lib}{brew_prefix}/lib:"
         + os.environ.get("DYLD_LIBRARY_PATH", "")
     )
     tool_env["CPATH"] = (
         f"{llvm_prefix}/include:{omp_prefix}/include:"
-        f"{hdf5_prefix}/include:{brew_prefix}/include:"
+        f"{hdf5_inc}{brew_prefix}/include:"
         + os.environ.get("CPATH", "")
     )
     ldflags = (
         f"-L{llvm_prefix}/lib -Wl,-rpath,{llvm_prefix}/lib "
         f"-L{omp_prefix}/lib -Wl,-rpath,{omp_prefix}/lib "
-        f"-L{hdf5_prefix}/lib -Wl,-rpath,{hdf5_prefix}/lib "
-        f"-L{brew_prefix}/lib "
+        + (f"-L{hdf5_prefix}/lib -Wl,-rpath,{hdf5_prefix}/lib " if mpi else "")
+        + f"-L{brew_prefix}/lib "
         + os.environ.get("LDFLAGS", "")
     ).strip()
     tool_env["LDFLAGS"] = ldflags
     cppflags = (
         f"-I{llvm_prefix}/include -I{omp_prefix}/include "
-        f"-I{hdf5_prefix}/include -I{brew_prefix}/include "
+        + (f"-I{hdf5_prefix}/include " if mpi else "")
+        + f"-I{brew_prefix}/include "
         + os.environ.get("CPPFLAGS", "")
     ).strip()
     tool_env["CPPFLAGS"] = cppflags
@@ -140,31 +161,85 @@ def build_petsc(
         petsc_env = get_darwin_tool_env(zigcc_path, zigcxx_path)
         petsc_env.pop("PETSC_DIR", None)
         petsc_env.pop("PETSC_ARCH", None)
-        petsc_cmd = [
-            "./scripts/update_and_rebuild_petsc.sh",
-            "--skip-submodule-update",
-            "--CXXOPTFLAGS=-O3",
-            "--COPTFLAGS=-O3",
-            "--FOPTFLAGS=-O3",
-            "--download-strumpack=0",
-            "--with-strumpack=0",
-            "--download-kokkos=0",
-            "--with-kokkos=0",
-            "--download-kokkos-kernels=0",
-            "--with-kokkos-kernels=0",
-            "--download-libceed=0",
-            "--with-libceed=0",
-            "--download-umpire=0",
-            "--with-umpire=0",
-        ]
-        subprocess.run(
-            petsc_cmd,
-            cwd=str(moose_dir),
-            env=petsc_env,
-            check=True,
-        )
+        if is_mpi_build():
+            petsc_cmd = [
+                "./scripts/update_and_rebuild_petsc.sh",
+                "--skip-submodule-update",
+                "--CXXOPTFLAGS=-O3",
+                "--COPTFLAGS=-O3",
+                "--FOPTFLAGS=-O3",
+                "--download-strumpack=0",
+                "--with-strumpack=0",
+                "--download-kokkos=0",
+                "--with-kokkos=0",
+                "--download-kokkos-kernels=0",
+                "--with-kokkos-kernels=0",
+                "--download-libceed=0",
+                "--with-libceed=0",
+                "--download-umpire=0",
+                "--with-umpire=0",
+            ]
+            subprocess.run(
+                petsc_cmd,
+                cwd=str(moose_dir),
+                env=petsc_env,
+                check=True,
+            )
+        else:
+            _build_petsc_serial(
+                moose_dir, zigcc_path, zigcxx_path, petsc_env
+            )
     else:
         print("[OK] PETSc already built.")
+
+
+def _build_petsc_serial(
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+    petsc_env: dict[str, str],
+) -> None:
+    """Configure and build serial (MPIUNI) PETSc directly.
+
+    Same minimal recipe as the Linux serial build: no Fortran, no MPI,
+    shared libraries, BLAS via f2cblaslapack. Unverified on macOS hardware
+    so far; the macOS CI build is the proving ground.
+    """
+    print("--> Building serial PETSc (no MPI)...")
+    petsc_dir = moose_dir / "petsc"
+    env = dict(petsc_env)
+    env["PETSC_DIR"] = str(petsc_dir)
+    env["PETSC_ARCH"] = "arch-moose"
+    jobs = os.environ.get("MOOSE_JOBS", str(os.cpu_count() or 4))
+    subprocess.run(
+        [
+            "./configure",
+            "PETSC_ARCH=arch-moose",
+            f"--with-cc={zigcc_path}",
+            f"--with-cxx={zigcxx_path}",
+            "--with-fc=0",
+            "--with-fortran-bindings=0",
+            "--with-mpi=0",
+            "--with-shared-libraries=1",
+            "--with-debugging=no",
+            "--download-f2cblaslapack=1",
+        ],
+        cwd=str(petsc_dir),
+        env=env,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "make",
+            f"PETSC_DIR={petsc_dir}",
+            "PETSC_ARCH=arch-moose",
+            "all",
+            f"-j{jobs}",
+        ],
+        cwd=str(petsc_dir),
+        env=env,
+        check=True,
+    )
 
 
 def apply_macos_patches(moose_dir: Path, repo_dir: Path) -> None:
@@ -362,10 +437,15 @@ def build_libmesh(
         # in nglib's gzstream.cpp). Disable it via the documented
         # libMesh configure option; MOOSE degrades gracefully (reports the
         # missing capability, errors only if XYZDelaunayGenerator is used).
+        mpi_args = (
+            ["--with-mpi"]
+            if is_mpi_build()
+            else ["--disable-petsc-hypre-required"]
+        )
         subprocess.run(
             [
                 "./scripts/update_and_rebuild_libmesh.sh",
-                "--with-mpi",
+                *mpi_args,
                 "--disable-netgen",
             ],
             cwd=str(moose_dir),
@@ -518,6 +598,7 @@ def configure_moose(
         )
     else:
         print("[OK] MOOSE framework already configured.")
+    ensure_serial_mpi_fallback(moose_dir)
 
 
 def build_darwin_dependencies(

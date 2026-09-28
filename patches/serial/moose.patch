@@ -1,0 +1,159 @@
+diff --git a/framework/src/userobjects/SolutionUserObjectBase.C b/framework/src/userobjects/SolutionUserObjectBase.C
+index c6039cde..7c09ce39 100644
+--- a/framework/src/userobjects/SolutionUserObjectBase.C
++++ b/framework/src/userobjects/SolutionUserObjectBase.C
+@@ -245,9 +245,13 @@ SolutionUserObjectBase::readExodusIIOrNemesis()
+   }
+   else
+   {
++#ifdef LIBMESH_HAVE_NEMESIS_API
+     _nemesis_io = std::make_unique<libMesh::Nemesis_IO>(*_mesh);
+     _nemesis_io->read(_mesh_file);
+     _exodus_times = &_nemesis_io->get_time_steps();
++#else
++    mooseError("Nemesis file support requires libMesh compiled with Nemesis API");
++#endif
+   }
+   // Same routine for Nemesis
+   readBlockIdMapFromExodusII();
+@@ -255,8 +259,12 @@ SolutionUserObjectBase::readExodusIIOrNemesis()
+   if (isParamValid("timestep"))
+   {
+     std::string s_timestep = getParam<std::string>("timestep");
++#ifdef LIBMESH_HAVE_NEMESIS_API
+     int n_steps = (_file_type == "exodusII") ? _exodusII_io->get_num_time_steps()
+                                              : _nemesis_io->get_num_time_steps();
++#else
++    int n_steps = _exodusII_io->get_num_time_steps();
++#endif
+     if (s_timestep == "LATEST")
+       _exodus_time_index = n_steps;
+     else
+@@ -298,6 +306,7 @@ SolutionUserObjectBase::readExodusIIOrNemesis()
+   _system = &_es->get_system(_system_name);
+ 
+   // Get the variable name lists as set; these need to be sets to perform set_intersection
++#ifdef LIBMESH_HAVE_NEMESIS_API
+   const std::vector<std::string> & all_nodal((_file_type == "exodusII")
+                                                  ? _exodusII_io->get_nodal_var_names()
+                                                  : _nemesis_io->get_nodal_var_names());
+@@ -307,6 +316,11 @@ SolutionUserObjectBase::readExodusIIOrNemesis()
+   const std::vector<std::string> & all_scalar((_file_type == "exodusII")
+                                                   ? _exodusII_io->get_global_var_names()
+                                                   : _nemesis_io->get_global_var_names());
++#else
++  const std::vector<std::string> & all_nodal(_exodusII_io->get_nodal_var_names());
++  const std::vector<std::string> & all_elemental(_exodusII_io->get_elem_var_names());
++  const std::vector<std::string> & all_scalar(_exodusII_io->get_global_var_names());
++#endif
+ 
+   // Build nodal/elemental variable lists, limit to variables listed in 'system_variables', if
+   // provided
+@@ -403,11 +417,13 @@ SolutionUserObjectBase::readExodusIIOrNemesis()
+       copy_solutions(*_exodusII_io, *_system, _exodus_index1 + 1);
+       copy_solutions(*_exodusII_io, *_system2, _exodus_index2 + 1);
+     }
++#ifdef LIBMESH_HAVE_NEMESIS_API
+     else
+     {
+       copy_solutions(*_nemesis_io, *_system, _exodus_index1 + 1);
+       copy_solutions(*_nemesis_io, *_system2, _exodus_index2 + 1);
+     }
++#endif
+ 
+     // Update the systems
+     _system->update();
+@@ -429,8 +445,10 @@ SolutionUserObjectBase::readExodusIIOrNemesis()
+     // Copy the values from the ExodusII/Nemsis file
+     if (_file_type == "exodusII")
+       copy_solutions(*_exodusII_io, *_system, _exodus_time_index);
++#ifdef LIBMESH_HAVE_NEMESIS_API
+     else
+       copy_solutions(*_nemesis_io, *_system, _exodus_time_index);
++#endif
+ 
+     // Update the equations systems
+     _system->update();
+@@ -670,8 +688,10 @@ SolutionUserObjectBase::updateTimeInterpolationFromFile()
+ 
+       if (_file_type == "exodusII")
+         update_solutions(*_exodusII_io, *_system, _exodus_index1 + 1);
++#ifdef LIBMESH_HAVE_NEMESIS_API
+       else
+         update_solutions(*_nemesis_io, *_system, _exodus_index1 + 1);
++#endif
+ 
+       _system->update();
+       _es->update();
+@@ -679,8 +699,10 @@ SolutionUserObjectBase::updateTimeInterpolationFromFile()
+ 
+       if (_file_type == "exodusII")
+         update_solutions(*_exodusII_io, *_system2, _exodus_index2 + 1);
++#ifdef LIBMESH_HAVE_NEMESIS_API
+       else
+         update_solutions(*_nemesis_io, *_system2, _exodus_index2 + 1);
++#endif
+ 
+       _system2->update();
+       _es2->update();
+@@ -1327,8 +1349,12 @@ void
+ SolutionUserObjectBase::readBlockIdMapFromExodusII()
+ {
+ #ifdef LIBMESH_HAVE_EXODUS_API
++#ifdef LIBMESH_HAVE_NEMESIS_API
+   const auto * exio_helper = (_file_type == "exodusII") ? &_exodusII_io->get_exio_helper()
+                                                         : &_nemesis_io->get_nemio_helper();
++#else
++  const auto * exio_helper = &_exodusII_io->get_exio_helper();
++#endif
+   const auto & id_to_block = exio_helper->id_to_block_names;
+   _block_name_to_id.clear();
+   _block_id_to_name.clear();
+diff --git a/framework/src/utils/MemoryUtils.C b/framework/src/utils/MemoryUtils.C
+index dec080a6..95cf42f5 100644
+--- a/framework/src/utils/MemoryUtils.C
++++ b/framework/src/utils/MemoryUtils.C
+@@ -11,7 +11,9 @@
+ #include "MooseError.h"
+ 
+ #include <unistd.h>
++#ifdef LIBMESH_HAVE_MPI
+ #include <mpi.h>
++#endif
+ #include <fstream>
+ #include <array>
+ 
+diff --git a/modules/ray_tracing/include/utils/SendBuffer.h b/modules/ray_tracing/include/utils/SendBuffer.h
+index 6186230f..86dd90fe 100644
+--- a/modules/ray_tracing/include/utils/SendBuffer.h
++++ b/modules/ray_tracing/include/utils/SendBuffer.h
+@@ -208,11 +208,15 @@ SendBuffer<Object, Context>::forceSend(const bool shrink_current_buffer_size)
+     _objects_sent += _buffer.size();
+     _buffers_sent++;
+ 
++#if LIBMESH_HAVE_MPI
+     std::shared_ptr<std::vector<typename Parallel::Packing<std::shared_ptr<Object>>::buffer_type>>
+         buffer = _buffer_pool.acquire();
+ 
+     comm().nonblocking_send_packed_range(
+         _pid, _context, _buffer.begin(), _buffer.end(), *req, buffer, _object_buffer_tag);
++#else
++    mooseError("Parallel study sending buffer is not supported without MPI.");
++#endif
+ 
+     _buffer.clear();
+     _buffer.reserve(_max_buffer_size);
+diff --git a/modules/solid_mechanics/include/utils/abaqus/SMAAspUserUtilities.h b/modules/solid_mechanics/include/utils/abaqus/SMAAspUserUtilities.h
+index e9542899..5bfaa035 100644
+--- a/modules/solid_mechanics/include/utils/abaqus/SMAAspUserUtilities.h
++++ b/modules/solid_mechanics/include/utils/abaqus/SMAAspUserUtilities.h
+@@ -9,7 +9,9 @@
+ 
+ #pragma once
+ 
++#ifdef LIBMESH_HAVE_MPI
+ #include "mpi.h"
++#endif
+ 
+ extern "C" int getnumthreads_();
+ extern "C" int get_thread_id_();
