@@ -221,8 +221,6 @@ jobs:
             moose/libmesh/config.log
           if-no-files-found: ignore
 
-          if-no-files-found: ignore
-
       - name: "macOS: Post failure comment"
         if: failure()
         env:
