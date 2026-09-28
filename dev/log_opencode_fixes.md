@@ -1,5 +1,12 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-28 — Linux cold rebuild hit GitLab outage (external flake, no code change)
+
+- **CI run**: Linux `36445828196` (SHA `595edc9`) failed at 5 min in `Build PETSc`: `git submodule update` could not clone `libmesh/contrib/eigen/git` — `fatal: remote error: GitLab is currently unable to handle this request due to load`, repeated across git's internal retries and our 5×30s backoff in `ensure_moose_submodules` (the 30s gaps are visible in the clone timestamps; the attempt lines share a timestamp only due to stdout buffering). Linux was green before solely because warm caches never reached the clone step; the `common.py` key-bust forced a cold checkout into the outage window.
+- **Response**: no code change — the retry logic worked as designed and the outage outlasted it (genuinely externally flaky, the one case retries are for). Probed GitLab recovery (`git ls-remote` OK), then re-triggered: `gh run rerun --failed` was refused by the API ("workflow file may be broken"), so ran `gh workflow run "Linux: Build Wheel and Test" --ref dev` (same HEAD); the original PR run also restarted. Both validate identical code; duplicate cache saves under the same keys are harmless (caches are immutable, content identical).
+- **Files changed**: none (this entry only).
+- **Remaining uncertainty**: none on cause. If GitLab outages recur, consider raising `max_attempts`/backoff — deliberately not tuned on a single data point.
+
 ## 2026-09-28 — macOS wheel omits Homebrew libomp (dyld abort on clean machines)
 
 - **CI run**: macOS smoke `36442246527` (SHA `cf0bcfb`; build+tests green) — clean-venv `--version` dies: `dyld: Library not loaded: /opt/homebrew/opt/llvm/lib/libomp.dylib ... Abort trap: 6`.
