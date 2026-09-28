@@ -73,7 +73,7 @@ jobs:
             src/rabbit/bin
             src/rabbit/lib
             src/rabbit/share
-          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-macOS-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
       - name: "macOS: Restore PETSc cache"
@@ -82,9 +82,9 @@ jobs:
         id: petsc-cache
         with:
           path: moose/petsc
-          key: macos-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
-            macos-petsc-
+            macos-serial-petsc-
 
       - name: "macOS: Build PETSc"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.petsc-cache.outputs.cache-hit != 'true'
@@ -96,7 +96,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/petsc
-          key: macos-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 2: libMesh Dependency ---
       - name: "macOS: Restore libMesh cache"
@@ -105,9 +105,9 @@ jobs:
         id: libmesh-cache
         with:
           path: moose/libmesh/installed
-          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
-            macos-libmesh-
+            macos-serial-libmesh-
 
       - name: "macOS: Build libMesh"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.libmesh-cache.outputs.cache-hit != 'true'
@@ -119,7 +119,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/libmesh/installed
-          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "macOS: Restore WASP cache"
@@ -130,9 +130,9 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: macos-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
-            macos-wasp-
+            macos-serial-wasp-
 
       - name: "macOS: Build WASP and HIT"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.wasp-cache.outputs.cache-hit != 'true'
@@ -146,7 +146,7 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: macos-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 4: MOOSE Framework Configuration ---
       # NOTE: conf_vars.mk carries the matching -I flags for the decisions
@@ -160,9 +160,9 @@ jobs:
           path: |
             moose/framework/include/base/MooseConfig.h
             moose/conf_vars.mk
-          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
-            macos-mooseconfig-
+            macos-serial-mooseconfig-
 
       - name: "macOS: Configure MOOSE"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'
@@ -176,7 +176,7 @@ jobs:
           path: |
             moose/framework/include/base/MooseConfig.h
             moose/conf_vars.mk
-          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 5: Build Rabbit Application and Wheel ---
       - name: "macOS: Build Rabbit, stage artifacts, and build wheel"
@@ -197,7 +197,7 @@ jobs:
             src/rabbit/bin
             src/rabbit/lib
             src/rabbit/share
-          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-macOS-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       - name: "macOS: Upload wheel artifact"
         uses: actions/upload-artifact@v4

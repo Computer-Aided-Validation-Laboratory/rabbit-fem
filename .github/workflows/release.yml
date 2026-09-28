@@ -70,7 +70,7 @@ jobs:
             src/rabbit/bin
             src/rabbit/lib
             src/rabbit/share
-          key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-Linux-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
       - name: "Linux: Restore PETSc cache"
@@ -79,9 +79,9 @@ jobs:
         id: petsc-cache
         with:
           path: moose/petsc
-          key: linux-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
           restore-keys: |
-            linux-petsc-
+            linux-serial-petsc-
 
       # --- Stage 2: libMesh Dependency ---
       - name: "Linux: Restore libMesh cache"
@@ -90,9 +90,9 @@ jobs:
         id: libmesh-cache
         with:
           path: moose/libmesh/installed
-          key: linux-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
           restore-keys: |
-            linux-libmesh-
+            linux-serial-libmesh-
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "Linux: Restore WASP cache"
@@ -103,9 +103,9 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: linux-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
           restore-keys: |
-            linux-wasp-
+            linux-serial-wasp-
 
       # --- Stage 4: MOOSE Framework Configuration ---
       - name: "Linux: Restore MOOSE Config cache"
@@ -114,9 +114,9 @@ jobs:
         id: mooseconfig-cache
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: linux-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
           restore-keys: |
-            linux-mooseconfig-
+            linux-serial-mooseconfig-
 
       - name: "Linux: Build MOOSE dependencies"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
@@ -448,7 +448,7 @@ jobs:
             src/rabbit/bin
             src/rabbit/lib
             src/rabbit/share
-          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-macOS-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
       - name: "macOS: Restore PETSc cache"
@@ -457,9 +457,9 @@ jobs:
         id: petsc-cache
         with:
           path: moose/petsc
-          key: macos-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
-            macos-petsc-
+            macos-serial-petsc-
 
       # --- Stage 2: libMesh Dependency ---
       - name: "macOS: Restore libMesh cache"
@@ -468,9 +468,9 @@ jobs:
         id: libmesh-cache
         with:
           path: moose/libmesh/installed
-          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
-            macos-libmesh-
+            macos-serial-libmesh-
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "macOS: Restore WASP cache"
@@ -481,9 +481,9 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: macos-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
-            macos-wasp-
+            macos-serial-wasp-
 
       # --- Stage 4: MOOSE Framework Configuration ---
       - name: "macOS: Restore MOOSE Config cache"
@@ -494,9 +494,9 @@ jobs:
           path: |
             moose/framework/include/base/MooseConfig.h
             moose/conf_vars.mk
-          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
           restore-keys: |
-            macos-mooseconfig-
+            macos-serial-mooseconfig-
 
       - name: "macOS: Build MOOSE dependencies"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
