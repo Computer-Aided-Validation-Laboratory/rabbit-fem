@@ -62,6 +62,7 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
+            src/rabbit/share
           key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
@@ -170,26 +171,6 @@ jobs:
         run: |
           uv run python build_rabbit.py --test
 
-      # Smoke test the already-built wheel (restored from cache or built
-      # above) in a clean venv with build env vars stripped. No rebuild:
-      # this catches missing bundled .so files (e.g. libomp) that the
-      # build-tree test suite cannot see.
-      - name: "Linux: Clean-venv smoke test of built wheel"
-        run: |
-          uv venv /tmp/rabbit-smoke
-          uv pip install --python /tmp/rabbit-smoke/bin/python dist/*.whl
-          SMOKE_BIN=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.cli import get_binary_path; print(get_binary_path())")
-          echo "Smoke binary: $SMOKE_BIN"
-          env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH /tmp/rabbit-smoke/bin/rabbit --version
-          if LD_LIBRARY_PATH= ldd "$SMOKE_BIN" | grep -q "not found"; then
-            echo "::error::Wheel is missing shared libraries:"
-            LD_LIBRARY_PATH= ldd "$SMOKE_BIN" | grep "not found"
-            exit 1
-          fi
-          mkdir -p /tmp/rabbit-smoke-run && cd /tmp/rabbit-smoke-run
-          env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH /tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Smoke solve OK')"
-          ls -la /tmp/rabbit-smoke-run/*.e
-
       - name: "Linux: Save wheel cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -198,6 +179,7 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
+            src/rabbit/share
           key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       - name: "Linux: Upload wheel artifact"
@@ -206,3 +188,12 @@ jobs:
           name: rabbit-fem-linux-wheel
           path: dist/*.whl
           if-no-files-found: error
+
+  linux-smoke:
+    name: "Linux: Clean-machine smoke test"
+    needs: linux-build-and-test
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: linux
+      artifact: rabbit-fem-linux-wheel
+      runner: ubuntu-24.04

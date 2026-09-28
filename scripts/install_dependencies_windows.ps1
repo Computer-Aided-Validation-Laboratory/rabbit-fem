@@ -455,6 +455,25 @@ if ($Stage -in @("all", "rabbit")) {
     }
     Copy-Item $RabbitExe (Join-Path $BinTarget "rabbit.exe") -Force
     Write-Host "[OK] Staged executable to $BinTarget\rabbit.exe" -ForegroundColor Green
+
+    # 11b. Stage MOOSE runtime data files into the package. The binary
+    # resolves them from <exe>/../share/<name>/data, falling back to
+    # absolute in-tree paths baked in at compile time that do not exist
+    # on user machines, so a wheel without them fails at startup.
+    $ShareTarget = Join-Path $RepoRoot "src\rabbit\share"
+    foreach ($pair in @(
+        @("moose", "moose\framework\data"),
+        @("solid_mechanics", "moose\modules\solid_mechanics\data")
+    )) {
+        $DataSrc = Join-Path $RepoRoot $pair[1]
+        if (-not (Test-Path $DataSrc)) {
+            throw "Cannot create a standalone wheel; MOOSE data directory missing: $DataSrc."
+        }
+        $DataDest = Join-Path $ShareTarget (Join-Path $pair[0] "data")
+        if (Test-Path $DataDest) { Remove-Item $DataDest -Recurse -Force }
+        Copy-Item $DataSrc $DataDest -Recurse -Force
+        Write-Host "[OK] Staged data files to $DataDest" -ForegroundColor Green
+    }
 }
 
 # 12. Run Verification Tests

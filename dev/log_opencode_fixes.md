@@ -1,5 +1,16 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-28 — PyPI install fails "Failed to determine data file path for 'moose'" (product bug + CI blind spot)
+
+- **Report**: clean `pip install rabbit-fem==2026.9.5` into a fresh venv aborts at startup in `Registry::determineDataFilePath` for `'moose'` (then would hit `'solid_mechanics'` next: `SolidMechanicsApp.C` also calls `registerAppDataFilePath`).
+- **Root cause (product)**: `determineDataFilePath` tries `<exe>/../share/<name>/data` first, then falls back to absolute in-tree paths baked in at compile time. The wheel staged `bin/` + `lib/` only — no `share/` — so on any machine other than the builder both lookups fail.
+- **Root cause (CI blind spot)**: every existing check runs on the machine that just built the binary, where the baked in-tree path (`/home/runner/work/.../moose/...`) still exists — the fallback silently rescues the missing installed path. Same-machine smoke tests and the build-tree suite therefore cannot see this failure class.
+- **Fix (product)**: new `stage_moose_data()` in `scripts/build/common.py` (called from `stage_artifacts`) stages `moose/framework/data` and `moose/modules/solid_mechanics/data` to `src/rabbit/share/<name>/data`; same staging added to `install_dependencies_windows.ps1` §11b; `src/rabbit/share/` gitignored; `src/rabbit/share/**/*` added to wheel `artifacts`; `src/rabbit/share` added to all wheel-cache paths.
+- **Fix (CI)**: new reusable `.github/workflows/smoke.yml` (`workflow_call`, CI-only): fresh runner, no checkout (hence no `moose/` tree), downloads the exact wheel artifact, clean uv venv install, `--version` + `ldd`/`otool` audit + real HEX8 `cube_thermomech` solve. Wired as `*-smoke` jobs in all three build workflows (runs on every PR, no rebuild) and in `release.yml` with `publish` gated on all three smoke jobs.
+- **Files changed**: `scripts/build/common.py`, `scripts/install_dependencies_windows.ps1`, `pyproject.toml`, `.gitignore`, `test/test_staging.py` (2 new unit tests), `.github/workflows/{smoke.yml,linux,macos,windows_build_and_test.yml,release.yml}`.
+- **Verification**: rebuilt wheel contains `rabbit/share/{moose,solid_mechanics}/data` (4 files); with both in-tree data dirs hidden, a HEX8 `end_time=1` solve converges (returncode 0, `.e` produced) — the installed path resolves; in-tree data restored intact; `test_staging` + `test_moose_pins` → 11 passed; all workflow YAML parses with correct job/call structure. Live proof is the next CI round (smoke jobs) and the next PyPI install.
+- **Remaining uncertainty**: none on mechanism. Whether any other runtime file class (e.g. module `.json` outside `data/`) is install-path-sensitive will surface in the fresh-runner smoke solve.
+
 ## 2026-09-28 — All OS: darwin patch tests fail where submodule sources absent (test bug exposed by wider suite)
 
 - **CI runs**: first 3-OS release — Linux and macOS `Run test suite` fail identically (`3 failed, 38 passed`): `test_poly2tri/libmesh/wasp_patch_applies_to_pristine_tree` die in `shutil.copy` with `FileNotFoundError` for `moose/libmesh/.../shapes.h`, `moose/libmesh/.../dof_object.h`, `moose/.../wasp/.../Format.h`.

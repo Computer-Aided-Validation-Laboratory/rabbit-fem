@@ -26,6 +26,7 @@ null.o
 src/rabbit/bin/
 src/rabbit/lib/
 !src/rabbit/lib/.gitkeep
+src/rabbit/share/
 
 .zig_wrappers/
 .zig-cache/

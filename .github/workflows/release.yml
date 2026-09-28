@@ -69,6 +69,7 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
+            src/rabbit/share
           key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
@@ -191,6 +192,7 @@ jobs:
           path: |
             dist
             src/rabbit/bin
+            src/rabbit/share
           key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
 
       # --- Stage 1: PETSc Dependency ---
@@ -322,6 +324,7 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
+            src/rabbit/share
           key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
@@ -393,9 +396,40 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  # Clean-machine smoke tests: fresh runners with no checkout and therefore
+  # no moose/ source tree, so the binary's baked in-tree fallback paths
+  # cannot mask a broken wheel. Publish is gated on these, not just the
+  # build-tree test suites.
+  smoke-linux:
+    name: "Linux: Clean-machine smoke test"
+    needs: build-linux
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: linux
+      artifact: rabbit-fem-linux-wheel
+      runner: ubuntu-24.04
+
+  smoke-windows:
+    name: "Windows: Clean-machine smoke test"
+    needs: build-windows
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: windows
+      artifact: rabbit-fem-windows-wheel
+      runner: windows-latest
+
+  smoke-macos:
+    name: "macOS: Clean-machine smoke test"
+    needs: build-macos
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: macos
+      artifact: rabbit-fem-macos-wheel
+      runner: macos-15
+
   publish:
     name: "Publish Consolidated Release to PyPI"
-    needs: [build-linux, build-windows, build-macos]
+    needs: [build-linux, build-windows, build-macos, smoke-linux, smoke-windows, smoke-macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     environment:

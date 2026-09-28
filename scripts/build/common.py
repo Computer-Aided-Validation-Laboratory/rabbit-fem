@@ -512,6 +512,33 @@ def index_system_openmp_libs(
                 available_libs[path.name] = path
 
 
+def stage_moose_data(repo_dir: Path, moose_dir: Path) -> None:
+    """Stage MOOSE runtime data files into src/rabbit/share.
+
+    MOOSE resolves data files from ``<exe>/../share/<name>/data``,
+    falling back to absolute in-tree paths baked in at compile time that
+    do not exist on user machines. A wheel without these files fails at
+    startup with "Failed to determine data file path".
+    """
+    share_target_dir = repo_dir / "src" / "rabbit" / "share"
+    for app_name, data_src in (
+        ("moose", moose_dir / "framework" / "data"),
+        (
+            "solid_mechanics",
+            moose_dir / "modules" / "solid_mechanics" / "data",
+        ),
+    ):
+        if not data_src.is_dir():
+            raise FileNotFoundError(
+                "Cannot create a standalone wheel; MOOSE data directory "
+                f"missing: {data_src}"
+            )
+        data_dest = share_target_dir / app_name / "data"
+        if data_dest.is_dir():
+            shutil.rmtree(data_dest)
+        shutil.copytree(data_src, data_dest)
+
+
 def stage_artifacts(
     repo_dir: Path,
     moose_dir: Path,
@@ -565,6 +592,8 @@ def stage_artifacts(
     for soname, real_path in resolved_libs.items():
         dest = lib_target_dir / soname
         shutil.copy2(real_path, dest)
+
+    stage_moose_data(repo_dir, moose_dir)
 
     print("Stripping debug symbols from libraries and executable...")
     if sys.platform == "darwin":
