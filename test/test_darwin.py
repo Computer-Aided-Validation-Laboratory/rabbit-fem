@@ -36,6 +36,20 @@ REAL_WASP_PATCH = REPO_ROOT / "patches" / "macos" / "wasp.patch"
 REAL_TINYHTTP_PATCH = REPO_ROOT / "patches" / "macos" / "tinyhttp.patch"
 
 
+def _require_pinned_source(path: Path) -> Path:
+    """Return a pinned source file, skipping when submodules are absent.
+
+    ``moose/`` is gitignored, not a submodule, so its content exists only
+    when a build step materialized it. Jobs that restore built artifacts
+    only (e.g. release jobs restoring ``installed/`` trees) have no
+    submodule sources; the build-and-test workflows do and still exercise
+    these tests.
+    """
+    if not path.is_file():
+        pytest.skip(f"Pinned source not materialized: {path}")
+    return path
+
+
 def _run_build_libmesh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> list[list[str]]:
@@ -246,15 +260,17 @@ def test_poly2tri_patch_applies_to_pristine_tree(
     )
     target.mkdir(parents=True)
     shutil.copy(
-        REPO_ROOT
-        / "moose"
-        / "libmesh"
-        / "contrib"
-        / "poly2tri"
-        / "poly2tri"
-        / "poly2tri"
-        / "common"
-        / "shapes.h",
+        _require_pinned_source(
+            REPO_ROOT
+            / "moose"
+            / "libmesh"
+            / "contrib"
+            / "poly2tri"
+            / "poly2tri"
+            / "poly2tri"
+            / "common"
+            / "shapes.h"
+        ),
         target / "shapes.h",
     )
     (repo_dir / "patches" / "macos").mkdir(parents=True)
@@ -286,12 +302,14 @@ def test_libmesh_patch_applies_to_pristine_tree(tmp_path: Path) -> None:
     target = tmp_path / "moose" / "libmesh" / "include" / "base"
     target.mkdir(parents=True)
     shutil.copy(
-        REPO_ROOT
-        / "moose"
-        / "libmesh"
-        / "include"
-        / "base"
-        / "dof_object.h",
+        _require_pinned_source(
+            REPO_ROOT
+            / "moose"
+            / "libmesh"
+            / "include"
+            / "base"
+            / "dof_object.h"
+        ),
         target / "dof_object.h",
     )
     (repo_dir / "patches" / "macos").mkdir(parents=True)
@@ -323,13 +341,15 @@ def test_wasp_patch_applies_to_pristine_tree(tmp_path: Path) -> None:
     target = tmp_path / "moose" / "framework" / "contrib" / "wasp" / "waspcore"
     target.mkdir(parents=True)
     shutil.copy(
-        REPO_ROOT
-        / "moose"
-        / "framework"
-        / "contrib"
-        / "wasp"
-        / "waspcore"
-        / "Format.h",
+        _require_pinned_source(
+            REPO_ROOT
+            / "moose"
+            / "framework"
+            / "contrib"
+            / "wasp"
+            / "waspcore"
+            / "Format.h"
+        ),
         target / "Format.h",
     )
     (repo_dir / "patches" / "macos").mkdir(parents=True)

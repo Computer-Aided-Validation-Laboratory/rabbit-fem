@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-28 — All OS: darwin patch tests fail where submodule sources absent (test bug exposed by wider suite)
+
+- **CI runs**: first 3-OS release — Linux and macOS `Run test suite` fail identically (`3 failed, 38 passed`): `test_poly2tri/libmesh/wasp_patch_applies_to_pristine_tree` die in `shutil.copy` with `FileNotFoundError` for `moose/libmesh/.../shapes.h`, `moose/libmesh/.../dof_object.h`, `moose/.../wasp/.../Format.h`.
+- **Root cause**: test-harness assumption, not product. The three tests copy real files out of the local `moose/` submodule checkouts, but `moose/` is gitignored (not a submodule) — its content exists only when a build step materialized it. `release.yml` restores built artifacts only (`installed/`, `arch-*/`, `MooseConfig.h`), never submodule sources, so the files are absent. Previously `run_tests` ran only `test_simulations.py`, hiding the assumption; widening it to `test/` exposed it. (The tinyhttp sibling passed because `moose/framework` *is* materialized via the shallow framework fetch.)
+- **Fix**: new `_require_pinned_source()` helper in `test/test_darwin.py` — `pytest.skip` with the missing path when the pinned source is not materialized, applied at the three `shutil.copy` sites. Same precedent as the file's existing absent-source handling and `verify_moose_deps`' unverifiable-checkout warning. Build-and-test workflows (which materialize sources) still exercise the patches; release jobs skip cleanly.
+- **Platform considerations**: test-only change, OS-independent; no product or workflow files touched.
+- **Files changed**: `test/test_darwin.py` (helper + 3 call sites), `dev/log_opencode_fixes.md` (this entry).
+- **Verification**: full `test_darwin.py` → 16 passed locally (sources present, patches genuinely exercised); helper probed against absent path → `Skipped`; absent-path behavior is exactly the release-runner state. Next release round is the live proof (expect `3 skipped, 38 passed` there, full pass in build-and-test).
+- **Remaining uncertainty**: none on mechanism.
+
 ## 2026-09-25 — Green matrix on bfc941d (all three OS)
 
 - **Runs**: macOS `36184794144` (16m), Linux `36184794342` (22m), Windows `36184794498` (41m) — all `success` on commit `bfc941d`, including `Run test suite` on each OS. The four fixes above (ensure-before-patch, `@rpath` relink, RPATH strip, isolated-layout mirror) compose to a fully green matrix with warm caches.
