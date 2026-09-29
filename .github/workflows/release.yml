@@ -594,7 +594,10 @@ jobs:
           linux_count=$(ls dist/*manylinux*.whl 2>/dev/null | wc -l)
           win_count=$(ls dist/*win_amd64.whl 2>/dev/null | wc -l)
           mac_count=$(ls dist/*macosx*.whl 2>/dev/null | wc -l)
-          mpi_count=$(ls dist/rabbit-fem-mpi-*.whl 2>/dev/null | wc -l)
+          # NOTE: wheel filenames normalize "-" to "_" (PEP 427), so the
+          # rabbit-fem-mpi distribution lands as rabbit_fem_mpi-*.whl.
+          # Glob the normalized stem, not the project name.
+          mpi_count=$(ls dist/rabbit_fem_mpi-*.whl 2>/dev/null | wc -l)
           echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s), $mac_count macOS wheel(s) and $mpi_count MPI wheel(s)."
           if [ "$linux_count" -lt 1 ]; then
             echo "::error::Missing Linux manylinux wheel in dist/!"

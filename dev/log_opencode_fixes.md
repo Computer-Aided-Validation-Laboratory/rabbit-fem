@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-29 — Release check globbed hyphenated MPI wheel name (nothing was missing)
+
+- **CI run**: release `36546376398` (v2026.9.6) failed in `Verify all required platform wheels are present`: `Found 2 Linux, 1 Windows, 1 macOS and 0 MPI ... Missing rabbit-fem-mpi wheel`, yet `dist/` plainly contained `rabbit_fem_mpi-2026.9.6-...-manylinux_2_38_x86_64.whl`.
+- **Root cause**: check-script bug, not a missing artifact. The Linux/Windows/macOS counts glob platform tags (`*manylinux*`, `*win_amd64*`, `*macosx*`), which survive wheel-filename normalization verbatim — but the MPI count globbed the distribution name with hyphens (`rabbit-fem-mpi-*.whl`), while PEP 427 normalizes it to `rabbit_fem_mpi-*.whl` on disk. The download step worked; only the assertion could never match.
+- **Fix**: `mpi_count` now globs `dist/rabbit_fem_mpi-*.whl`, with a comment recording the normalization rule. No other hyphenated filename references exist (artifact *names* like `rabbit-fem-mpi-wheel` are unaffected — only wheel *filenames* normalize).
+- **Files changed**: `.github/workflows/release.yml`, `dev/log_opencode_fixes.md` (one commit).
+- **Verification**: YAML parses; replayed the exact check against the four real filenames from the failed run's `dist/` listing — old glob counts 0 (reproduces the failure), new glob counts 1 and the full block passes.
+- **Re-release note**: re-running the failed jobs would reuse the pre-fix SHA, so the fix must reach `main` first; then move the unpublished `v2026.9.6` tag to the new merge commit and push it to retrigger (`publish` never ran, so nothing consumed the tag). Expect a full cold rebuild on main (release jobs are restore-only and main has no dep caches yet).
+
 ## 2026-09-29 — Green board on afb85c2 (all four pipelines + smokes)
 
 - **Runs** (PR #6, SHA `afb85c2`): Linux `36530439070` success (1h08m, incl. smoke), macOS `36530439027` success (42m, incl. smoke), Windows `36530438997` success (42m), MPI `36530438983` success (1h55m, incl. smoke). The mac serial wheel is now genuinely self-contained (bundled `libomp.dylib` + `libpng16.16.dylib`, no `-lX11`, `--with-x=0` PETSc) and the dep-cache fallback trap is closed on every OS.
