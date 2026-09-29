@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-28 — macOS staging names libpng16 as the next absolute brew dep
+
+- **CI runs**: macOS `36445828175` + `36447732261` (both carry the libomp fix) fail identically in `Build Rabbit, stage artifacts, and build wheel`: `FileNotFoundError: Cannot create a standalone wheel; required shared libraries were not found: libpng16.16.dylib`.
+- **Root cause**: same class as libomp — the serial binary links Homebrew libpng (from the `brew install libpng` added for the MOOSE PNG-configure fix) by absolute path, and only libomp had been allowlisted for staging. The new loud-unresolved behavior worked as designed: it named the exact missing lib at build time instead of shipping another dyld time-bomb.
+- **Fix**: renamed `_DARWIN_OPENMP_PATTERNS` → `_DARWIN_HOMEBREW_RUNTIME_PATTERNS` (explicit per-lib allowlist so each external runtime stays a conscious bundling decision) and added `libpng16*.dylib` under both brew prefixes. If further absolute brew deps hide behind libpng, staging names each one in turn.
+- **CI cost note**: `common.py` is in the serial/MPI dep keys again, so one more cold dep round on Linux-serial, Linux-MPI and macOS-serial; Windows untouched.
+- **Files changed**: `scripts/build/common.py`, `test/test_staging.py`, `dev/log_opencode_fixes.md` (batched in one commit to avoid retrigger spam).
+- **Verification**: 75 unit tests pass; live proof is the next mac round (staging includes both `libomp.dylib` and `libpng16.16.dylib`, smoke `--version` on a brew-less runner).
+- **Remaining uncertainty**: further absolute brew deps behind libpng (e.g. a brew zlib instead of system libz) — staging will name them if so.
+
 ## 2026-09-28 — Linux cold rebuild hit GitLab outage (external flake, no code change)
 
 - **CI run**: Linux `36445828196` (SHA `595edc9`) failed at 5 min in `Build PETSc`: `git submodule update` could not clone `libmesh/contrib/eigen/git` — `fatal: remote error: GitLab is currently unable to handle this request due to load`, repeated across git's internal retries and our 5×30s backoff in `ensure_moose_submodules` (the 30s gaps are visible in the clone timestamps; the attempt lines share a timestamp only due to stdout buffering). Linux was green before solely because warm caches never reached the clone step; the `common.py` key-bust forced a cold checkout into the outage window.

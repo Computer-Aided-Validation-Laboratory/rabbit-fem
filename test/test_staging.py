@@ -24,7 +24,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from build.common import (
-    _DARWIN_OPENMP_PATTERNS,
+    _DARWIN_HOMEBREW_RUNTIME_PATTERNS,
     find_needed_libraries,
     index_system_openmp_libs,
     stage_moose_data,
@@ -85,11 +85,16 @@ def test_darwin_indexes_system_libs(
 
 
 def test_darwin_default_patterns_cover_homebrew() -> None:
-    """Default macOS patterns must cover both brew prefixes and providers."""
-    joined = "\n".join(_DARWIN_OPENMP_PATTERNS)
+    """Default macOS patterns must cover brew prefixes and runtime providers.
+
+    Every absolute Homebrew reference in the serial binary (OpenMP from
+    llvm/libomp, libpng from the PNG-support brew install) must resolve
+    to a staged `@rpath` lib; anything else fails loudly at staging.
+    """
+    joined = "\n".join(_DARWIN_HOMEBREW_RUNTIME_PATTERNS)
     for prefix in ("/opt/homebrew", "/usr/local"):
         assert prefix in joined
-    for provider in ("opt/llvm", "opt/libomp"):
+    for provider in ("opt/llvm", "opt/libomp", "opt/libpng"):
         assert provider in joined
 
 

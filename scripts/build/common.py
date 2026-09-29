@@ -509,15 +509,19 @@ _SYSTEM_OPENMP_PATTERNS = (
     "/opt/rocm-*/lib/llvm/lib-debug/libomp.so*",
 )
 
-# Homebrew OpenMP runtimes. The macOS linker records the absolute build
-# path (e.g. /opt/homebrew/opt/llvm/lib/libomp.dylib), which does not
-# exist on clean user machines, so the wheel must bundle it exactly like
-# Linux bundles libomp.so.5.
-_DARWIN_OPENMP_PATTERNS = (
+# Homebrew runtime libraries. The macOS linker records absolute build
+# paths (e.g. /opt/homebrew/opt/llvm/lib/libomp.dylib), which do not
+# exist on clean user machines, so the wheel must bundle them exactly
+# like Linux bundles libomp.so.5. Each entry is an explicit allowlist
+# decision: the serial build must stay fully self-contained, so every
+# absolute Homebrew reference gets staged rather than left for dyld.
+_DARWIN_HOMEBREW_RUNTIME_PATTERNS = (
     "/opt/homebrew/opt/llvm/lib/libomp.dylib",
     "/opt/homebrew/opt/libomp/lib/libomp.dylib",
     "/usr/local/opt/llvm/lib/libomp.dylib",
     "/usr/local/opt/libomp/lib/libomp.dylib",
+    "/opt/homebrew/opt/libpng/lib/libpng16*.dylib",
+    "/usr/local/opt/libpng/lib/libpng16*.dylib",
 )
 
 
@@ -540,7 +544,7 @@ def index_system_openmp_libs(
 
     if patterns is None:
         patterns = (
-            _DARWIN_OPENMP_PATTERNS
+            _DARWIN_HOMEBREW_RUNTIME_PATTERNS
             if sys.platform == "darwin"
             else _SYSTEM_OPENMP_PATTERNS
         )
