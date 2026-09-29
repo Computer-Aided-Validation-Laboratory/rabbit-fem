@@ -1,5 +1,10 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-29 — Green board on afb85c2 (all four pipelines + smokes)
+
+- **Runs** (PR #6, SHA `afb85c2`): Linux `36530439070` success (1h08m, incl. smoke), macOS `36530439027` success (42m, incl. smoke), Windows `36530438997` success (42m), MPI `36530438983` success (1h55m, incl. smoke). The mac serial wheel is now genuinely self-contained (bundled `libomp.dylib` + `libpng16.16.dylib`, no `-lX11`, `--with-x=0` PETSc) and the dep-cache fallback trap is closed on every OS.
+- **Files changed**: none (this entry only).
+
 ## 2026-09-28 — macOS staging names libpng16 as the next absolute brew dep
 
 - **CI runs**: macOS `36445828175` + `36447732261` (both carry the libomp fix) fail identically in `Build Rabbit, stage artifacts, and build wheel`: `FileNotFoundError: Cannot create a standalone wheel; required shared libraries were not found: libpng16.16.dylib`.
