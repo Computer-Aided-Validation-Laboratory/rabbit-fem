@@ -1,5 +1,9 @@
-name: "Linux: Build Wheel and Test"
+name: "MPI: Build Wheel and Test"
 
+# Linux-only MPI variant of rabbit-fem (published as rabbit-fem-mpi).
+# The default wheels are serial/SMP builds; this workflow produces the
+# opt-in multi-rank build. The RABBIT_MPI=1 switch selects the MPI
+# dependency stack and MPI-linked binary in build_rabbit.py.
 on:
   push:
     branches: ["main"]
@@ -12,19 +16,19 @@ permissions:
   id-token: write
 
 jobs:
-  linux-build-and-test:
-    name: "Linux: Build Wheel and Test"
+  mpi-build-and-test:
+    name: "MPI: Build Wheel and Test"
     runs-on: ubuntu-24.04
     timeout-minutes: 360
 
     steps:
-      - name: "Linux: Checkout repository"
+      - name: "MPI: Checkout repository"
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
 
-      - name: "Linux: Install system packages"
+      - name: "MPI: Install system packages"
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -37,24 +41,25 @@ jobs:
             libomp-dev \
             libglu1-mesa
 
-      - name: "Linux: Set up uv"
+      - name: "MPI: Set up uv"
         uses: astral-sh/setup-uv@v5
         with:
           version: "latest"
           enable-cache: true
 
-      - name: "Linux: Set up Python"
+      - name: "MPI: Set up Python"
         run: |
           uv python install 3.13
           uv venv .venv
           echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
 
-      - name: "Linux: Install Python build tools"
+      - name: "MPI: Install Python build tools"
         run: |
           uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh numpy netCDF4
 
-      # --- Top-Level Fast Path: Wheel Cache ---
-      - name: "Linux: Restore wheel cache"
+      # All cache keys carry an -mpi suffix so this stack never shares
+      # state with the default serial Linux build.
+      - name: "MPI: Restore wheel cache"
         uses: actions/cache/restore@v4
         id: wheel-cache
         with:
@@ -63,9 +68,8 @@ jobs:
             src/rabbit/bin
             src/rabbit/lib
             src/rabbit/share
-          key: rabbit-fem-wheel-Linux-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-Linux-mpi-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
-      # --- Stage 1: PETSc Dependency ---
       # NOTE: dependency caches use exact keys with no restore-keys prefix
       # fallback. A key miss means the recipe changed, so any older tree
       # would be stale; the build scripts skip stages whose artifacts already
@@ -73,49 +77,51 @@ jobs:
       # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
       # A miss therefore rebuilds from scratch, which is what a recipe change
       # requires.
-      - name: "Linux: Restore PETSc cache"
+      - name: "MPI: Restore PETSc cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         id: petsc-cache
         with:
           path: moose/petsc
-          key: linux-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mpi-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
-      - name: "Linux: Build PETSc"
+      - name: "MPI: Build PETSc"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.petsc-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
         run: |
           uv run python build_rabbit.py --build-petsc
 
-      - name: "Linux: Save PETSc cache"
+      - name: "MPI: Save PETSc cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.petsc-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: moose/petsc
-          key: linux-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mpi-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
-      # --- Stage 2: libMesh Dependency ---
-      - name: "Linux: Restore libMesh cache"
+      - name: "MPI: Restore libMesh cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         id: libmesh-cache
         with:
           path: moose/libmesh/installed
-          key: linux-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mpi-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
-      - name: "Linux: Build libMesh"
+      - name: "MPI: Build libMesh"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.libmesh-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
         run: |
           uv run python build_rabbit.py --build-libmesh
 
-      - name: "Linux: Save libMesh cache"
+      - name: "MPI: Save libMesh cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.libmesh-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: moose/libmesh/installed
-          key: linux-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mpi-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
-      # --- Stage 3: WASP and HIT Dependency ---
-      - name: "Linux: Restore WASP cache"
+      - name: "MPI: Restore WASP cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         id: wasp-cache
@@ -123,54 +129,60 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: linux-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mpi-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
-      - name: "Linux: Build WASP and HIT"
+      - name: "MPI: Build WASP and HIT"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.wasp-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
         run: |
           uv run python build_rabbit.py --build-wasp
 
-      - name: "Linux: Save WASP cache"
+      - name: "MPI: Save WASP cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.wasp-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: linux-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mpi-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
-      # --- Stage 4: MOOSE Framework Configuration ---
-      - name: "Linux: Restore MOOSE Config cache"
+      - name: "MPI: Restore MOOSE Config cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         id: mooseconfig-cache
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: linux-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mpi-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
-      - name: "Linux: Configure MOOSE"
+      - name: "MPI: Configure MOOSE"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
         run: |
           uv run python build_rabbit.py --configure-moose
 
-      - name: "Linux: Save MOOSE Config cache"
+      - name: "MPI: Save MOOSE Config cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: linux-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+          key: linux-mpi-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
-      # --- Stage 5: Build Rabbit Application and Wheel ---
-      - name: "Linux: Build Rabbit, stage artifacts, and build wheel"
+      - name: "MPI: Build Rabbit, stage artifacts, and build wheel"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
         run: |
           uv run python build_rabbit.py --wheel
 
-      - name: "Linux: Run test suite"
+      - name: "MPI: Run test suite"
+        env:
+          RABBIT_MPI: "1"
         run: |
           uv run python build_rabbit.py --test
 
-      - name: "Linux: Save wheel cache"
+      - name: "MPI: Save wheel cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -179,20 +191,21 @@ jobs:
             src/rabbit/bin
             src/rabbit/lib
             src/rabbit/share
-          key: rabbit-fem-wheel-Linux-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+          key: rabbit-fem-wheel-Linux-mpi-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
-      - name: "Linux: Upload wheel artifact"
+      - name: "MPI: Upload wheel artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: rabbit-fem-linux-wheel
+          name: rabbit-fem-mpi-wheel
           path: dist/*.whl
           if-no-files-found: error
 
-  linux-smoke:
-    name: "Linux: Clean-machine smoke test"
-    needs: linux-build-and-test
+  mpi-smoke:
+    name: "MPI: Clean-machine smoke test"
+    needs: mpi-build-and-test
     uses: ./.github/workflows/smoke.yml
     with:
       platform: linux
-      artifact: rabbit-fem-linux-wheel
+      artifact: rabbit-fem-mpi-wheel
       runner: ubuntu-24.04
+      mpi: true

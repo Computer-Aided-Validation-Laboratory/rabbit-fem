@@ -69,18 +69,24 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-Linux-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+            src/rabbit/share
+          key: rabbit-fem-wheel-Linux-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
       - name: "Linux: Restore PETSc cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         id: petsc-cache
         with:
           path: moose/petsc
-          key: linux-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-petsc-
+          key: linux-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       # --- Stage 2: libMesh Dependency ---
       - name: "Linux: Restore libMesh cache"
@@ -89,9 +95,7 @@ jobs:
         id: libmesh-cache
         with:
           path: moose/libmesh/installed
-          key: linux-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-libmesh-
+          key: linux-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "Linux: Restore WASP cache"
@@ -102,9 +106,7 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: linux-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-wasp-
+          key: linux-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       # --- Stage 4: MOOSE Framework Configuration ---
       - name: "Linux: Restore MOOSE Config cache"
@@ -113,9 +115,7 @@ jobs:
         id: mooseconfig-cache
         with:
           path: moose/framework/include/base/MooseConfig.h
-          key: linux-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            linux-mooseconfig-
+          key: linux-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       - name: "Linux: Build MOOSE dependencies"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
@@ -135,6 +135,128 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rabbit-fem-linux-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  build-mpi:
+    name: "MPI: Build and Verify Wheel"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: "MPI: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: "MPI: Install system packages"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            gfortran \
+            libopenmpi-dev \
+            openmpi-bin \
+            patchelf \
+            libtirpc-dev \
+            libomp-dev \
+            libglu1-mesa
+
+      - name: "MPI: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "MPI: Set up Python"
+        run: |
+          uv python install 3.13
+          uv venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: "MPI: Install Python build tools"
+        run: |
+          uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh numpy netCDF4
+
+      # MPI caches use the exact same -mpi suffixed keys as
+      # mpi_build_and_test.yml. Restore-only; that workflow owns population.
+      - name: "MPI: Restore wheel cache"
+        uses: actions/cache/restore@v4
+        id: wheel-cache
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/lib
+            src/rabbit/share
+          key: rabbit-fem-wheel-Linux-mpi-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
+      - name: "MPI: Restore PETSc cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: petsc-cache
+        with:
+          path: moose/petsc
+          key: linux-mpi-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPI: Restore libMesh cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: libmesh-cache
+        with:
+          path: moose/libmesh/installed
+          key: linux-mpi-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPI: Restore WASP cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: wasp-cache
+        with:
+          path: |
+            moose/framework/contrib/wasp/install
+            moose/framework/contrib/hit
+          key: linux-mpi-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPI: Restore MOOSE Config cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mooseconfig-cache
+        with:
+          path: moose/framework/include/base/MooseConfig.h
+          key: linux-mpi-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPI: Build MOOSE dependencies"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
+        run: |
+          uv run python build_rabbit.py --moose
+
+      - name: "MPI: Build Rabbit, stage artifacts, and build wheel"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
+        run: |
+          uv run python build_rabbit.py --wheel
+
+      - name: "MPI: Run test suite"
+        env:
+          RABBIT_MPI: "1"
+        run: |
+          uv run python build_rabbit.py --test
+
+      - name: "MPI: Upload wheel artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rabbit-fem-mpi-wheel
           path: dist/*.whl
           if-no-files-found: error
 
@@ -191,9 +313,17 @@ jobs:
           path: |
             dist
             src/rabbit/bin
+            src/rabbit/share
           key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
 
       # --- Stage 1: PETSc Dependency ---
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
       - name: "Windows: Restore PETSc cache"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
@@ -201,8 +331,6 @@ jobs:
         with:
           path: moose/petsc/arch-windows-opt
           key: windows-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-petsc-
 
       # --- Stage 2: libMesh Dependency ---
       - name: "Windows: Restore libMesh cache"
@@ -212,8 +340,6 @@ jobs:
         with:
           path: moose/libmesh/installed
           key: windows-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-libmesh-
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "Windows: Restore WASP cache"
@@ -226,8 +352,6 @@ jobs:
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
           key: windows-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-wasp-
 
       # --- Stage 4: MOOSE Framework Configuration ---
       - name: "Windows: Restore MOOSE Config cache"
@@ -237,8 +361,6 @@ jobs:
         with:
           path: moose/framework/include/base/MooseConfig.h
           key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-mooseconfig-
 
       - name: "Windows: Build MOOSE dependencies and Rabbit"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
@@ -279,12 +401,10 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           brew install \
-            open-mpi \
             gcc \
             llvm \
             libomp \
             libpng \
-            hdf5-mpi \
             bison \
             flex \
             pkgconf \
@@ -322,18 +442,24 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+            src/rabbit/share
+          key: rabbit-fem-wheel-macOS-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
       - name: "macOS: Restore PETSc cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         id: petsc-cache
         with:
           path: moose/petsc
-          key: macos-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            macos-petsc-
+          key: macos-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 2: libMesh Dependency ---
       - name: "macOS: Restore libMesh cache"
@@ -342,9 +468,7 @@ jobs:
         id: libmesh-cache
         with:
           path: moose/libmesh/installed
-          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            macos-libmesh-
+          key: macos-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "macOS: Restore WASP cache"
@@ -355,9 +479,7 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: macos-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            macos-wasp-
+          key: macos-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 4: MOOSE Framework Configuration ---
       - name: "macOS: Restore MOOSE Config cache"
@@ -368,9 +490,7 @@ jobs:
           path: |
             moose/framework/include/base/MooseConfig.h
             moose/conf_vars.mk
-          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            macos-mooseconfig-
+          key: macos-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       - name: "macOS: Build MOOSE dependencies"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
@@ -393,9 +513,50 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  # Clean-machine smoke tests: fresh runners with no checkout and therefore
+  # no moose/ source tree, so the binary's baked in-tree fallback paths
+  # cannot mask a broken wheel. Publish is gated on these, not just the
+  # build-tree test suites.
+  smoke-linux:
+    name: "Linux: Clean-machine smoke test"
+    needs: build-linux
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: linux
+      artifact: rabbit-fem-linux-wheel
+      runner: ubuntu-24.04
+
+  smoke-windows:
+    name: "Windows: Clean-machine smoke test"
+    needs: build-windows
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: windows
+      artifact: rabbit-fem-windows-wheel
+      runner: windows-latest
+
+  smoke-macos:
+    name: "macOS: Clean-machine smoke test"
+    needs: build-macos
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: macos
+      artifact: rabbit-fem-macos-wheel
+      runner: macos-15
+
+  smoke-mpi:
+    name: "MPI: Clean-machine smoke test"
+    needs: build-mpi
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: linux
+      artifact: rabbit-fem-mpi-wheel
+      runner: ubuntu-24.04
+      mpi: true
+
   publish:
     name: "Publish Consolidated Release to PyPI"
-    needs: [build-linux, build-windows, build-macos]
+    needs: [build-linux, build-windows, build-macos, build-mpi, smoke-linux, smoke-windows, smoke-macos, smoke-mpi]
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     environment:
@@ -433,7 +594,8 @@ jobs:
           linux_count=$(ls dist/*manylinux*.whl 2>/dev/null | wc -l)
           win_count=$(ls dist/*win_amd64.whl 2>/dev/null | wc -l)
           mac_count=$(ls dist/*macosx*.whl 2>/dev/null | wc -l)
-          echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s) and $mac_count macOS wheel(s)."
+          mpi_count=$(ls dist/rabbit-fem-mpi-*.whl 2>/dev/null | wc -l)
+          echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s), $mac_count macOS wheel(s) and $mpi_count MPI wheel(s)."
           if [ "$linux_count" -lt 1 ]; then
             echo "::error::Missing Linux manylinux wheel in dist/!"
             exit 1
@@ -444,6 +606,10 @@ jobs:
           fi
           if [ "$mac_count" -lt 1 ]; then
             echo "::error::Missing macOS macosx wheel in dist/!"
+            exit 1
+          fi
+          if [ "$mpi_count" -lt 1 ]; then
+            echo "::error::Missing rabbit-fem-mpi wheel in dist/!"
             exit 1
           fi
           echo "All platform wheels verified successfully."

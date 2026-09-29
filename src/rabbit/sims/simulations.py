@@ -15,7 +15,6 @@ from importlib.resources import files
 import os
 from pathlib import Path
 import subprocess
-import sys
 
 
 class EDims(Enum):
@@ -370,10 +369,22 @@ def run_rabbit(
     subprocess.CompletedProcess[str]
         Result of the subprocess execution.
     """
-    from rabbit.cli import get_binary_path, get_library_dir
+    from rabbit.cli import (
+        get_binary_path,
+        get_library_dir,
+        is_mpi_binary,
+        mpi_launch_size,
+    )
 
     bin_path = get_binary_path()
     lib_dir = get_library_dir()
+    size = mpi_launch_size()
+    if size > 1 and not is_mpi_binary():
+        raise RuntimeError(
+            f"Launched with {size} MPI ranks but this rabbit binary is "
+            "the serial/SMP build, which cannot run multi-rank jobs. "
+            "Install the MPI variant instead: pip install rabbit-fem-mpi"
+        )
     env = dict(os.environ)
     if lib_dir.is_dir():
         curr_ld = env.get("LD_LIBRARY_PATH", "")
@@ -382,7 +393,7 @@ def run_rabbit(
         )
 
     cmd = [str(bin_path), "-i", str(input_path)]
-    if sys.platform == "win32":
+    if not is_mpi_binary():
         if not extra_args or not any("-pc_type" in arg for arg in extra_args):
             cmd.extend(["-pc_type", "ilu"])
     if extra_args:

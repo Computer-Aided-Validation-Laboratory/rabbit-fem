@@ -32,12 +32,10 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
         run: |
           brew install \
-            open-mpi \
             gcc \
             llvm \
             libomp \
             libpng \
-            hdf5-mpi \
             bison \
             flex \
             pkgconf \
@@ -72,18 +70,24 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+            src/rabbit/share
+          key: rabbit-fem-wheel-macOS-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       # --- Stage 1: PETSc Dependency ---
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
       - name: "macOS: Restore PETSc cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         id: petsc-cache
         with:
           path: moose/petsc
-          key: macos-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            macos-petsc-
+          key: macos-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       - name: "macOS: Build PETSc"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.petsc-cache.outputs.cache-hit != 'true'
@@ -95,7 +99,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/petsc
-          key: macos-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 2: libMesh Dependency ---
       - name: "macOS: Restore libMesh cache"
@@ -104,9 +108,7 @@ jobs:
         id: libmesh-cache
         with:
           path: moose/libmesh/installed
-          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            macos-libmesh-
+          key: macos-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       - name: "macOS: Build libMesh"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.libmesh-cache.outputs.cache-hit != 'true'
@@ -118,7 +120,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: moose/libmesh/installed
-          key: macos-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 3: WASP and HIT Dependency ---
       - name: "macOS: Restore WASP cache"
@@ -129,9 +131,7 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: macos-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            macos-wasp-
+          key: macos-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       - name: "macOS: Build WASP and HIT"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.wasp-cache.outputs.cache-hit != 'true'
@@ -145,7 +145,7 @@ jobs:
           path: |
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
-          key: macos-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 4: MOOSE Framework Configuration ---
       # NOTE: conf_vars.mk carries the matching -I flags for the decisions
@@ -159,9 +159,7 @@ jobs:
           path: |
             moose/framework/include/base/MooseConfig.h
             moose/conf_vars.mk
-          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
-          restore-keys: |
-            macos-mooseconfig-
+          key: macos-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       - name: "macOS: Configure MOOSE"
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'
@@ -175,7 +173,7 @@ jobs:
           path: |
             moose/framework/include/base/MooseConfig.h
             moose/conf_vars.mk
-          key: macos-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
+          key: macos-serial-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/darwin.py', 'scripts/build/common.py') }}
 
       # --- Stage 5: Build Rabbit Application and Wheel ---
       - name: "macOS: Build Rabbit, stage artifacts, and build wheel"
@@ -187,26 +185,6 @@ jobs:
         run: |
           uv run python build_rabbit.py --test
 
-      # Smoke test the already-built wheel (restored from cache or built
-      # above) in a clean venv with build env vars stripped. No rebuild:
-      # this catches missing bundled dylibs that the build-tree suite
-      # cannot see.
-      - name: "macOS: Clean-venv smoke test of built wheel"
-        run: |
-          uv venv /tmp/rabbit-smoke
-          uv pip install --python /tmp/rabbit-smoke/bin/python dist/*.whl
-          SMOKE_BIN=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.cli import get_binary_path; print(get_binary_path())")
-          echo "Smoke binary: $SMOKE_BIN"
-          env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/rabbit --version
-          if otool -L "$SMOKE_BIN" | grep -E "/Users/|/home/|/tmp/|/opt/moose" | grep -v "^$SMOKE_BIN"; then
-            echo "::error::Wheel links hardcoded build-tree paths:"
-            otool -L "$SMOKE_BIN"
-            exit 1
-          fi
-          mkdir -p /tmp/rabbit-smoke-run && cd /tmp/rabbit-smoke-run
-          env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Smoke solve OK')"
-          ls -la /tmp/rabbit-smoke-run/*.e
-
       - name: "macOS: Save wheel cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -215,7 +193,8 @@ jobs:
             dist
             src/rabbit/bin
             src/rabbit/lib
-          key: rabbit-fem-wheel-macOS-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+            src/rabbit/share
+          key: rabbit-fem-wheel-macOS-serial-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
 
       - name: "macOS: Upload wheel artifact"
         uses: actions/upload-artifact@v4
@@ -264,3 +243,12 @@ jobs:
           fi
           printf '```text\n%s\n```\n' "$tail_content" >> comment.txt
           gh pr comment 1 -R ${{ github.repository }} --body-file comment.txt || true
+
+  macos-smoke:
+    name: "macOS: Clean-machine smoke test"
+    needs: macos-build-and-test
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: macos
+      artifact: rabbit-fem-macos-wheel
+      runner: macos-15

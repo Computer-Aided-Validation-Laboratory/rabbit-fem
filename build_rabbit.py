@@ -229,6 +229,20 @@ def parse_args() -> argparse.Namespace:
             "staging, wheel, and tests."
         ),
     )
+    mpi_group = parser.add_mutually_exclusive_group()
+    mpi_group.add_argument(
+        "--mpi",
+        action="store_true",
+        help=(
+            "Build the MPI (multi-rank) variant (rabbit-fem-mpi wheel). "
+            "Default is the serial/SMP variant."
+        ),
+    )
+    mpi_group.add_argument(
+        "--no-mpi",
+        action="store_true",
+        help="Build the serial/SMP variant (default).",
+    )
     return parser.parse_args()
 
 
@@ -236,6 +250,11 @@ def main() -> None:
     """Main build orchestration entry point."""
     args = parse_args()
     repo_dir = Path(__file__).resolve().parent
+
+    if args.mpi:
+        os.environ["RABBIT_MPI"] = "1"
+    elif args.no_mpi:
+        os.environ["RABBIT_MPI"] = "0"
 
     # If only wheel packaging of existing staged artifacts was requested
     if args.wheel_only:

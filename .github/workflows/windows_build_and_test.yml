@@ -64,9 +64,17 @@ jobs:
           path: |
             dist
             src/rabbit/bin
+            src/rabbit/share
           key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
 
       # --- Stage 1: PETSc Dependency ---
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
       - name: "Windows: Restore PETSc cache"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
@@ -74,8 +82,6 @@ jobs:
         with:
           path: moose/petsc/arch-windows-opt
           key: windows-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-petsc-
 
       - name: "Windows: Build PETSc"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.petsc-windows-cache.outputs.cache-hit != 'true'
@@ -97,8 +103,6 @@ jobs:
         with:
           path: moose/libmesh/installed
           key: windows-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-libmesh-
 
       - name: "Windows: Build libMesh"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.libmesh-windows-cache.outputs.cache-hit != 'true'
@@ -123,8 +127,6 @@ jobs:
             moose/framework/contrib/wasp/build
             moose/framework/contrib/hit/hit.exe
           key: windows-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-wasp-
 
       - name: "Windows: Build WASP and HIT"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.wasp-windows-cache.outputs.cache-hit != 'true'
@@ -149,8 +151,6 @@ jobs:
         with:
           path: moose/framework/include/base/MooseConfig.h
           key: windows-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
-          restore-keys: |
-            windows-mooseconfig-
 
       - name: "Windows: Configure MOOSE"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true' && steps.mooseconfig-windows-cache.outputs.cache-hit != 'true'
@@ -179,32 +179,6 @@ jobs:
         run: |
           uv run python build_rabbit.py --test
 
-      # Smoke test the already-built wheel (restored from cache or built
-      # above) in a clean venv with build env vars stripped. No rebuild:
-      # this proves the wheel installs and solves on a machine without
-      # MOOSE/PETSc/libMesh checkouts.
-      - name: "Windows: Clean-venv smoke test of built wheel"
-        run: |
-          uv venv "$env:RUNNER_TEMP\rabbit-smoke"
-          $SmokePython = "$env:RUNNER_TEMP\rabbit-smoke\Scripts\python.exe"
-          $Wheel = (Get-ChildItem dist/*.whl | Select-Object -First 1).FullName
-          uv pip install --python $SmokePython $Wheel
-          Remove-Item Env:\MOOSE_DIR -ErrorAction SilentlyContinue
-          Remove-Item Env:\PETSC_DIR -ErrorAction SilentlyContinue
-          Remove-Item Env:\LIBMESH_DIR -ErrorAction SilentlyContinue
-          & "$env:RUNNER_TEMP\rabbit-smoke\Scripts\rabbit.exe" --version
-          if ($LASTEXITCODE -ne 0) { throw "Smoke rabbit --version failed" }
-          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\rabbit-smoke-run" | Out-Null
-          Push-Location "$env:RUNNER_TEMP\rabbit-smoke-run"
-          try {
-            & $SmokePython -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Smoke solve OK')"
-            if ($LASTEXITCODE -ne 0) { throw "Smoke solve failed" }
-            Get-ChildItem *.e | ForEach-Object { Write-Host "Output: $($_.Name) ($($_.Length) bytes)" }
-            if (-not (Get-ChildItem *.e)) { throw "No Exodus output produced" }
-          } finally {
-            Pop-Location
-          }
-
       - name: "Windows: Save wheel cache"
         if: steps.wheel-windows-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -212,6 +186,7 @@ jobs:
           path: |
             dist
             src/rabbit/bin
+            src/rabbit/share
           key: rabbit-fem-wheel-Windows-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
 
       - name: "Windows: Upload wheel artifact"
@@ -277,3 +252,12 @@ jobs:
           } catch {
             Write-Host "PR comment failed: $_"
           }
+
+  windows-smoke:
+    name: "Windows: Clean-machine smoke test"
+    needs: windows-build-and-test
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: windows
+      artifact: rabbit-fem-windows-wheel
+      runner: windows-latest
