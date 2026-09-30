@@ -196,3 +196,100 @@ jobs:
       platform: linux
       artifact: rabbit-fem-linux-wheel
       runner: ubuntu-24.04
+
+  # Python-version compat: the exact wheel built above is installed into
+  # one clean venv per supported interpreter (3.10-3.14; the primary
+  # 3.13 smoke above covers 3.13) and must solve HEX8 plus match the
+  # HEX8/HEX20 gold snapshots. Catches syntax/support regressions such
+  # as the 3.9 PEP 604 `X | Y` TypeError without rebuilding per version.
+  linux-compat:
+    name: "Linux: Wheel compat (py ${{ matrix.python }})"
+    needs: linux-build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.14"]
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: linux
+      artifact: rabbit-fem-linux-wheel
+      runner: ubuntu-24.04
+      python-version: ${{ matrix.python }}
+      run-gold: true
+
+  # Negative leg for the 3.9 colleague report: importing the package on
+  # 3.9 must fail with the clear 3.10-floor message, never a deep
+  # `TypeError: unsupported operand type(s) for |`. Needs no build
+  # artifact (the guard lives in src/), so no `needs:` and it runs in
+  # parallel with the build.
+  linux-floor:
+    name: "Linux: Python 3.9 floor message"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: "Floor: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: "Floor: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "Floor: Assert clear error on Python 3.9"
+        run: |
+          uv python install 3.9
+          UVPY=$(uv python find 3.9)
+          set +e
+          PYTHONPATH=src "$UVPY" -c "import rabbit" > floor.log 2>&1
+          RC=$?
+          set -e
+          cat floor.log
+          if [ $RC -eq 0 ]; then
+            echo "::error::'import rabbit' succeeded on Python 3.9; expected the 3.10-floor error."
+            exit 1
+          fi
+          grep -q "requires Python 3.10" floor.log || {
+            echo "::error::Python 3.9 error message does not mention the 3.10 floor."
+            exit 1
+          }
+          echo "Floor guard OK: Python 3.9 fails with the clear message."
+
+  # Mamba smoke: the exact wheel built above, installed with pip into a
+  # conda-managed env (python=3.13, the primary build version, so the
+  # installer is the only variable) on a clean runner. Narrow by
+  # design: solve-only (--version + HEX8 solve), no gold, no moose
+  # rebuild, no moose-from-mamba build. Guards the conda install path
+  # (activation env vars, site-packages layout) that uv legs cannot model.
+  linux-mamba:
+    name: "Linux: Mamba smoke (py 3.13)"
+    needs: linux-build-and-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: "Mamba: Set up micromamba"
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: rabbit-mamba-smoke
+          create-args: python=3.13 pip
+
+      - name: "Mamba: Download wheel artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: rabbit-fem-linux-wheel
+          path: dist/
+
+      - name: "Mamba (linux): Install wheel and solve"
+        run: |
+          # Same system-MPI runtime the uv smoke requires (wheel links
+          # system OpenMPI by design).
+          sudo apt-get update
+          sudo apt-get install -y openmpi-bin
+          micromamba run -n rabbit-mamba-smoke pip install dist/*.whl
+          env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH micromamba run -n rabbit-mamba-smoke rabbit --version
+          mkdir -p /tmp/rabbit-mamba-run && cd /tmp/rabbit-mamba-run
+          env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH micromamba run -n rabbit-mamba-smoke python -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Mamba smoke solve OK')"
+          ls -la /tmp/rabbit-mamba-run/*.e

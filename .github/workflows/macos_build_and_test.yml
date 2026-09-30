@@ -252,3 +252,101 @@ jobs:
       platform: macos
       artifact: rabbit-fem-macos-wheel
       runner: macos-15
+
+  # Python-version compat (macOS wheel): same shape as linux-compat.
+  # The HEX20 gold leg is the colleague's exact failing case
+  # (`rabbit cube_thermomech_HEX20.i`); the Mach-O diagnostics in
+  # smoke.yml run on every leg to catch `zsh: killed` (SIGKILL)
+  # regressions across interpreters.
+  macos-compat:
+    name: "macOS: Wheel compat (py ${{ matrix.python }})"
+    needs: macos-build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.14"]
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: macos
+      artifact: rabbit-fem-macos-wheel
+      runner: macos-15
+      python-version: ${{ matrix.python }}
+      run-gold: true
+
+  # Negative leg for the 3.9 colleague report (macOS runner proves the
+  # message on the affected platform). See linux-floor for rationale;
+  # no build artifact needed.
+  macos-floor:
+    name: "macOS: Python 3.9 floor message"
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: "Floor: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: "Floor: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "Floor: Assert clear error on Python 3.9"
+        run: |
+          uv python install 3.9
+          UVPY=$(uv python find 3.9)
+          set +e
+          PYTHONPATH=src "$UVPY" -c "import rabbit" > floor.log 2>&1
+          RC=$?
+          set -e
+          cat floor.log
+          if [ $RC -eq 0 ]; then
+            echo "::error::'import rabbit' succeeded on Python 3.9; expected the 3.10-floor error."
+            exit 1
+          fi
+          grep -q "requires Python 3.10" floor.log || {
+            echo "::error::Python 3.9 error message does not mention the 3.10 floor."
+            exit 1
+          }
+          echo "Floor guard OK: Python 3.9 fails with the clear message."
+
+  # Mamba smoke (macOS): same shape as linux-mamba — the exact built
+  # wheel pip-installed into a conda-managed python=3.13 env on a clean
+  # runner, solve-only. This is the affected platform from the colleague
+  # report, so a conda-path canary matters most here.
+  macos-mamba:
+    name: "macOS: Mamba smoke (py 3.13)"
+    needs: macos-build-and-test
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: "Mamba: Set up micromamba"
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: rabbit-mamba-smoke
+          create-args: python=3.13 pip
+
+      - name: "Mamba: Download wheel artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: rabbit-fem-macos-wheel
+          path: dist/
+
+      - name: "Mamba (macos): Install MPI runtime libraries"
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: |
+          # Same Homebrew MPI runtime the uv smoke requires (wheel links
+          # it by design, like Linux's system MPI).
+          brew install open-mpi hdf5-mpi
+
+      - name: "Mamba (macos): Install wheel and solve"
+        run: |
+          micromamba run -n rabbit-mamba-smoke pip install dist/*.whl
+          env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH micromamba run -n rabbit-mamba-smoke rabbit --version
+          mkdir -p /tmp/rabbit-mamba-run && cd /tmp/rabbit-mamba-run
+          env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH micromamba run -n rabbit-mamba-smoke python -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Mamba smoke solve OK')"
+          ls -la /tmp/rabbit-mamba-run/*.e
