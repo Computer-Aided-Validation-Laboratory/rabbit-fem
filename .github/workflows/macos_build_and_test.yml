@@ -252,3 +252,62 @@ jobs:
       platform: macos
       artifact: rabbit-fem-macos-wheel
       runner: macos-15
+
+  # Python-version compat (macOS wheel): same shape as linux-compat.
+  # The HEX20 gold leg is the colleague's exact failing case
+  # (`rabbit cube_thermomech_HEX20.i`); the Mach-O diagnostics in
+  # smoke.yml run on every leg to catch `zsh: killed` (SIGKILL)
+  # regressions across interpreters.
+  macos-compat:
+    name: "macOS: Wheel compat (py ${{ matrix.python }})"
+    needs: macos-build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.14"]
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: macos
+      artifact: rabbit-fem-macos-wheel
+      runner: macos-15
+      python-version: ${{ matrix.python }}
+      run-gold: true
+
+  # Negative leg for the 3.9 colleague report (macOS runner proves the
+  # message on the affected platform). See linux-floor for rationale;
+  # no build artifact needed.
+  macos-floor:
+    name: "macOS: Python 3.9 floor message"
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: "Floor: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: "Floor: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "Floor: Assert clear error on Python 3.9"
+        run: |
+          uv python install 3.9
+          UVPY=$(uv python find 3.9)
+          set +e
+          PYTHONPATH=src "$UVPY" -c "import rabbit" > floor.log 2>&1
+          RC=$?
+          set -e
+          cat floor.log
+          if [ $RC -eq 0 ]; then
+            echo "::error::'import rabbit' succeeded on Python 3.9; expected the 3.10-floor error."
+            exit 1
+          fi
+          grep -q "requires Python 3.10" floor.log || {
+            echo "::error::Python 3.9 error message does not mention the 3.10 floor."
+            exit 1
+          }
+          echo "Floor guard OK: Python 3.9 fails with the clear message."

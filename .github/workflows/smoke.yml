@@ -24,14 +24,38 @@ on:
         required: false
         default: false
         type: boolean
+      python-version:
+        description: "Python version for the clean smoke venv (compat matrix)"
+        required: false
+        default: "3.13"
+        type: string
+      run-gold:
+        description: "Run HEX8+HEX20 gold regression (test/test_cube_gold.py) after the smoke solve"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   smoke:
-    name: "Clean-machine smoke test (${{ inputs.platform }})"
+    name: "Clean-machine smoke test (${{ inputs.platform }}, py ${{ inputs.python-version }})"
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 30
 
     steps:
+      - name: "Smoke: Checkout regression tests (gold only)"
+        if: inputs.run-gold
+        uses: actions/checkout@v4
+        with:
+          # Sparse: only the pytest regression payload. moose/ is
+          # gitignored (never a submodule), so no checkout can
+          # materialize the in-tree data fallback paths the smoke job
+          # exists to exclude -- the clean-machine invariant holds.
+          fetch-depth: 1
+          submodules: false
+          sparse-checkout: |
+            test
+            pyproject.toml
+
       - name: "Smoke: Set up uv"
         uses: astral-sh/setup-uv@v5
         with:
@@ -40,7 +64,7 @@ jobs:
 
       - name: "Smoke: Set up Python"
         run: |
-          uv python install 3.13
+          uv python install ${{ inputs.python-version }}
 
       - name: "Smoke: Download wheel artifact"
         uses: actions/download-artifact@v4
@@ -59,6 +83,52 @@ jobs:
           # present even for serial runs.
           brew install open-mpi hdf5-mpi
 
+      - name: "Smoke (macos): Mach-O diagnostics"
+        if: inputs.platform == 'macos'
+        run: |
+          # Colleague report: `zsh: killed rabbit` even for bare `rabbit`
+          # (kernel SIGKILL, not a dyld abort). Facts first, all
+          # informational (codesign -dv prints either way; the --version
+          # and solve steps below remain the pass/fail gates):
+          # arch (arm64 vs Intel mismatch), linkage, and signature state
+          # after the install_name_tool relink + ad-hoc re-sign.
+          SMOKE_WHEEL=$(ls dist/*.whl | head -n 1)
+          echo "Wheel: $SMOKE_WHEEL"
+          uv venv /tmp/rabbit-smoke-diag --python ${{ inputs.python-version }}
+          uv pip install --python /tmp/rabbit-smoke-diag/bin/python "$SMOKE_WHEEL"
+          SMOKE_BIN=$(/tmp/rabbit-smoke-diag/bin/python -c "from rabbit.cli import get_binary_path; print(get_binary_path())")
+          echo "Smoke binary: $SMOKE_BIN"
+          uname -m
+          file "$SMOKE_BIN"
+          if command -v lipo >/dev/null 2>&1; then
+            lipo -info "$SMOKE_BIN"
+          fi
+          otool -L "$SMOKE_BIN"
+          # Informational only: an unsigned/invalid signature must not
+          # fail this step (the --version/solve steps below are the
+          # gates); the branch below keeps the outcome explicit.
+          if codesign -dv "$SMOKE_BIN" 2>&1; then
+            echo "codesign: signature validates."
+          else
+            echo "NOTE: binary is unsigned or its signature does not validate (see above)."
+          fi
+          # Direct exec separates wrapper failures from binary failures
+          # and names SIGKILL (137, the `zsh: killed` signature) loudly.
+          set +e
+          "$SMOKE_BIN" --version >/tmp/rabbit-diag-version.log 2>&1
+          RC=$?
+          set -e
+          cat /tmp/rabbit-diag-version.log
+          if [ $RC -eq 137 ]; then
+            echo "::error::rabbit binary SIGKILLed (exit 137, 'zsh: killed'). Suspect: invalid code signature after relinking or arm64/Intel arch mismatch. See file/lipo/codesign output above."
+            exit 1
+          fi
+          if [ $RC -ne 0 ]; then
+            echo "::error::rabbit binary --version failed with exit $RC (see log above)."
+            exit 1
+          fi
+          rm -rf /tmp/rabbit-smoke-diag
+
       - name: "Smoke (linux/macos): Install wheel in clean venv and solve"
         if: inputs.platform != 'windows'
         run: |
@@ -70,8 +140,11 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y openmpi-bin
           fi
-          uv venv /tmp/rabbit-smoke
+          uv venv /tmp/rabbit-smoke --python ${{ inputs.python-version }}
           uv pip install --python /tmp/rabbit-smoke/bin/python dist/*.whl
+          if [ "${{ inputs.run-gold }}" = "true" ]; then
+            uv pip install --python /tmp/rabbit-smoke/bin/python pytest numpy netCDF4
+          fi
           SMOKE_BIN=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.cli import get_binary_path; print(get_binary_path())")
           echo "Smoke binary: $SMOKE_BIN"
           if [ "${{ inputs.platform }}" = "linux" ]; then
@@ -108,10 +181,21 @@ jobs:
             ls -la /tmp/rabbit-smoke-smp-run/*.e
           fi
 
+      - name: "Smoke (linux/macos): Gold regression (HEX8 + HEX20)"
+        if: inputs.platform != 'windows' && inputs.run-gold
+        run: |
+          # Compares fresh solves against committed snapshots in
+          # test/gold/ (tolerances in test/test_cube_gold.py). HEX8 is
+          # the default smoke case; HEX20 is the colleague's failing
+          # case. The full six-element matrix runs in the build job's
+          # test suite (Python 3.13); these two bound compat-leg time.
+          cd "$GITHUB_WORKSPACE"
+          /tmp/rabbit-smoke/bin/python -m pytest test/test_cube_gold.py -k "HEX8 or HEX20" -v
+
       - name: "Smoke (windows): Install wheel in clean venv and solve"
         if: inputs.platform == 'windows'
         run: |
-          uv venv "$env:RUNNER_TEMP\rabbit-smoke"
+          uv venv "$env:RUNNER_TEMP\rabbit-smoke" --python ${{ inputs.python-version }}
           $SmokePython = "$env:RUNNER_TEMP\rabbit-smoke\Scripts\python.exe"
           $Wheel = (Get-ChildItem dist/*.whl | Select-Object -First 1).FullName
           uv pip install --python $SmokePython $Wheel

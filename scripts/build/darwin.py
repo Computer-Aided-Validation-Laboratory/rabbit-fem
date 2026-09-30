@@ -423,6 +423,24 @@ def relink_darwin_staged_artifacts(bin_path: Path, lib_dir: Path) -> None:
                 ],
                 check=True,
             )
+    # Rewriting load commands invalidates the Mach-O code signature, and
+    # on Apple Silicon the kernel SIGKILLs (``zsh: killed``) binaries
+    # whose signature no longer validates on machines other than the
+    # builder. Re-apply an ad-hoc signature so the staged tree runs
+    # wherever the wheel is installed. Documented codesign behaviour,
+    # not a CI workaround; check=True fails loudly instead of shipping
+    # an unsigned tree.
+    codesign = shutil.which("codesign")
+    if codesign is None:
+        raise RuntimeError(
+            "codesign not found: cannot re-sign staged macOS artifacts "
+            "after install_name_tool relinking."
+        )
+    for macho_path in [bin_path, *staged.values()]:
+        subprocess.run(
+            [codesign, "--force", "-s", "-", str(macho_path)],
+            check=True,
+        )
 
 
 def build_libmesh(

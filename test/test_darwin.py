@@ -592,10 +592,11 @@ def test_relink_rewrites_staged_refs_to_rpath(
             if "-l" in cmd:
                 return subprocess.CompletedProcess(cmd, 0, otool_l_outputs[name])
             return subprocess.CompletedProcess(cmd, 0, otool_outputs[name])
-        assert cmd[0] == "install_name_tool"
+        assert Path(cmd[0]).name in ("install_name_tool", "codesign")
         return subprocess.CompletedProcess(cmd, 0, "")
 
     monkeypatch.setattr(darwin.subprocess, "run", fake_run)
+    monkeypatch.setattr(darwin.shutil, "which", lambda name: f"/usr/bin/{name}")
 
     darwin.relink_darwin_staged_artifacts(staged_bin, lib_dir)
 
@@ -635,3 +636,16 @@ def test_relink_rewrites_staged_refs_to_rpath(
     assert ("@loader_path/../lib", "rabbit") in added
     assert ("@loader_path", "librabbit_test-opt.0.dylib") in added
     assert not [a for a in added if a[1] == "libmesh_opt.dylib"]
+
+    # install_name_tool invalidates the Mach-O signature: every staged
+    # file must be re-signed ad-hoc or Apple Silicon kernels SIGKILL
+    # (``zsh: killed``) the wheel on user machines.
+    sign_calls = [c for c in calls if Path(c[0]).name == "codesign"]
+    signed = sorted(Path(c[-1]).name for c in sign_calls)
+    assert signed == [
+        "libmesh_opt.dylib",
+        "librabbit_test-opt.0.dylib",
+        "rabbit",
+    ]
+    for call in sign_calls:
+        assert call[1:4] == ["--force", "-s", "-"]

@@ -196,3 +196,64 @@ jobs:
       platform: linux
       artifact: rabbit-fem-linux-wheel
       runner: ubuntu-24.04
+
+  # Python-version compat: the exact wheel built above is installed into
+  # one clean venv per supported interpreter (3.10-3.14; the primary
+  # 3.13 smoke above covers 3.13) and must solve HEX8 plus match the
+  # HEX8/HEX20 gold snapshots. Catches syntax/support regressions such
+  # as the 3.9 PEP 604 `X | Y` TypeError without rebuilding per version.
+  linux-compat:
+    name: "Linux: Wheel compat (py ${{ matrix.python }})"
+    needs: linux-build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.14"]
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: linux
+      artifact: rabbit-fem-linux-wheel
+      runner: ubuntu-24.04
+      python-version: ${{ matrix.python }}
+      run-gold: true
+
+  # Negative leg for the 3.9 colleague report: importing the package on
+  # 3.9 must fail with the clear 3.10-floor message, never a deep
+  # `TypeError: unsupported operand type(s) for |`. Needs no build
+  # artifact (the guard lives in src/), so no `needs:` and it runs in
+  # parallel with the build.
+  linux-floor:
+    name: "Linux: Python 3.9 floor message"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: "Floor: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: "Floor: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "Floor: Assert clear error on Python 3.9"
+        run: |
+          uv python install 3.9
+          UVPY=$(uv python find 3.9)
+          set +e
+          PYTHONPATH=src "$UVPY" -c "import rabbit" > floor.log 2>&1
+          RC=$?
+          set -e
+          cat floor.log
+          if [ $RC -eq 0 ]; then
+            echo "::error::'import rabbit' succeeded on Python 3.9; expected the 3.10-floor error."
+            exit 1
+          fi
+          grep -q "requires Python 3.10" floor.log || {
+            echo "::error::Python 3.9 error message does not mention the 3.10 floor."
+            exit 1
+          }
+          echo "Floor guard OK: Python 3.9 fails with the clear message."

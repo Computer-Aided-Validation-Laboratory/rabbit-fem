@@ -261,3 +261,57 @@ jobs:
       platform: windows
       artifact: rabbit-fem-windows-wheel
       runner: windows-latest
+
+  # Python-version compat (Windows wheel): install + --version + solve
+  # per interpreter. Gold comparison stays off here (pwsh/pytest
+  # duplication); it is covered by the Linux/macOS compat legs and the
+  # full suite in the primary build job.
+  windows-compat:
+    name: "Windows: Wheel compat (py ${{ matrix.python }})"
+    needs: windows-build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.14"]
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: windows
+      artifact: rabbit-fem-windows-wheel
+      runner: windows-latest
+      python-version: ${{ matrix.python }}
+      run-gold: false
+
+  # Negative leg for the 3.9 report on Windows (pwsh spelling of the
+  # same floor assertion as linux-floor; no build artifact needed).
+  windows-floor:
+    name: "Windows: Python 3.9 floor message"
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: "Floor: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: "Floor: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "Floor: Assert clear error on Python 3.9"
+        run: |
+          uv python install 3.9
+          $UVPY = ((uv python find 3.9) | Out-String).Trim()
+          $env:PYTHONPATH = "src"
+          & $UVPY -c "import rabbit" 2>&1 | Tee-Object floor.log
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "::error::'import rabbit' succeeded on Python 3.9; expected the 3.10-floor error."
+            exit 1
+          }
+          if (-not (Select-String -Path floor.log -Pattern "requires Python 3.10" -Quiet)) {
+            Write-Host "::error::Python 3.9 error message does not mention the 3.10 floor."
+            exit 1
+          }
+          Write-Host "Floor guard OK: Python 3.9 fails with the clear message."
