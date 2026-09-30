@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-30 — Mamba smoke legs: built wheel via conda-managed env (py 3.13, all OSes)
+
+- **Context**: CI was uv-only while colleague Mac failures were conda-based; no leg covered the conda install path (activation env vars, site-packages layout). Narrow by design, not a second matrix.
+- **Scope**: new `<os>-mamba` jobs (Linux/macOS/Windows) reuse the just-built wheel artifact on a clean runner, create a `python=3.13 pip` env via `mamba-org/setup-micromamba@v2`, pip-install the wheel, and run `--version` + HEX8 `end_time=1` solve asserting `.e` output. 3.13 chosen deliberately: it is the primary build/test interpreter, so the installer is the only variable. Solve-only (no gold — covered 5x per OS via uv), no moose-from-mamba build, no checkout, same env-stripping as uv smoke. MPI workflow untouched (Linux-only variant, out of scope).
+- **Platform considerations**: per-file native shells (bash Linux/macOS, pwsh Windows); Linux/macOS legs install the same system MPI runtimes the uv smoke requires; Windows leg success-asserts every native call immediately (the floor `$LASTEXITCODE` lesson). No shared code touched; no cache keys affected.
+- **Files changed**: `.github/workflows/{linux,macos,windows}_build_and_test.yml`, `dev/log_opencode_fixes.md`.
+- **Verification**: workflow YAML parses. Live proof is the next PR round (three ~5 min legs, no rebuild).
+- **Remaining uncertainty**: `setup-micromamba@v2` API drift (action pinned at major v2); first run confirms `create-args`/`micromamba run -n` behavior on all three runners.
+
 ## 2026-09-30 — windows-floor green assertions but red step: trailing $LASTEXITCODE
 
 - **CI run**: PR #8 Windows `36700028150`, job `Windows: Python 3.9 floor message` failed in `Floor: Assert clear error on Python 3.9` — yet the log shows the guard working exactly as designed (`RuntimeError: rabbit-fem requires Python 3.10 or newer (running 3.9.25)...`) followed by our own `Floor guard OK` line, then `Process completed with exit code 1`.

@@ -320,3 +320,47 @@ jobs:
           # so report this step's own verdict explicitly. Both failure
           # modes already `exit 1` above -- this line only runs on success.
           exit 0
+
+  # Mamba smoke (Windows): same shape as linux/mac-mamba, pwsh spelling
+  # — wheel pip-installed into a conda-managed python=3.13 env on a
+  # clean runner, solve-only. Every native call is success-asserted
+  # immediately (cf. the floor $LASTEXITCODE note above), so the step's
+  # trailing exit code is its own verdict.
+  windows-mamba:
+    name: "Windows: Mamba smoke (py 3.13)"
+    needs: windows-build-and-test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: "Mamba: Set up micromamba"
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: rabbit-mamba-smoke
+          create-args: python=3.13 pip
+
+      - name: "Mamba: Download wheel artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: rabbit-fem-windows-wheel
+          path: dist/
+
+      - name: "Mamba (windows): Install wheel and solve"
+        run: |
+          $Wheel = (Get-ChildItem dist/*.whl | Select-Object -First 1).FullName
+          micromamba run -n rabbit-mamba-smoke pip install $Wheel
+          if ($LASTEXITCODE -ne 0) { throw "Mamba pip install of wheel failed" }
+          Remove-Item Env:\MOOSE_DIR -ErrorAction SilentlyContinue
+          Remove-Item Env:\PETSC_DIR -ErrorAction SilentlyContinue
+          Remove-Item Env:\LIBMESH_DIR -ErrorAction SilentlyContinue
+          micromamba run -n rabbit-mamba-smoke rabbit --version
+          if ($LASTEXITCODE -ne 0) { throw "Mamba rabbit --version failed" }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\rabbit-mamba-run" | Out-Null
+          Push-Location "$env:RUNNER_TEMP\rabbit-mamba-run"
+          try {
+            micromamba run -n rabbit-mamba-smoke python -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Mamba smoke solve OK')"
+            if ($LASTEXITCODE -ne 0) { throw "Mamba smoke solve failed" }
+            Get-ChildItem *.e | ForEach-Object { Write-Host "Output: $($_.Name) ($($_.Length) bytes)" }
+            if (-not (Get-ChildItem *.e)) { throw "No Exodus output produced" }
+          } finally {
+            Pop-Location
+          }
