@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-30 — windows-floor green assertions but red step: trailing $LASTEXITCODE
+
+- **CI run**: PR #8 Windows `36700028150`, job `Windows: Python 3.9 floor message` failed in `Floor: Assert clear error on Python 3.9` — yet the log shows the guard working exactly as designed (`RuntimeError: rabbit-fem requires Python 3.10 or newer (running 3.9.25)...`) followed by our own `Floor guard OK` line, then `Process completed with exit code 1`.
+- **Root cause**: test-harness bug in the new pwsh step, not product. The probe `& $UVPY -c "import rabbit"` exits 1 by design, and pwsh keeps that native exit in `$LASTEXITCODE` past the subsequent `Write-Host`; GitHub fails pwsh steps on a nonzero trailing `$LASTEXITCODE`, so the step reported the probe's exit instead of its own verdict. The bash floor legs are immune (they end on `echo`, exit 0). Same-hazard audit: the Windows smoke solve block ends on success paths with `$LASTEXITCODE -eq 0` (each native call is immediately asserted), and the failure-comment step only runs on already-failed jobs — both left untouched.
+- **Fix**: explicit `exit 0` as the last line of the floor assertion (both failure modes already `exit 1` above, so it only runs on success), with a comment recording the pwsh rule. Windows-only file; Linux/macOS behavior byte-identical. This is explicit verdict reporting, not error masking.
+- **Files changed**: `.github/workflows/windows_build_and_test.yml`, `dev/log_opencode_fixes.md`.
+- **Verification**: YAML parses; logic re-traced against the failed log (probe RC=1 → skip first branch; message match → skip second; `exit 0`). No local pwsh runner here — live proof is the next PR round (floor leg green in ~1 min, no rebuild needed).
+- **Remaining uncertainty**: none on mechanism.
+
 ## 2026-09-30 — Windows compat legs run the HEX8/HEX20 gold comparison too
 
 - **Report**: reviewer asked why Windows compat skips field comparison — it should match within floating point tolerance like the other OSes.

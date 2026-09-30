@@ -314,3 +314,9 @@ jobs:
             exit 1
           }
           Write-Host "Floor guard OK: Python 3.9 fails with the clear message."
+          # The probed `import rabbit` exits 1 by design, and pwsh keeps
+          # that native exit in $LASTEXITCODE past the Write-Host above;
+          # GitHub fails pwsh steps on a nonzero trailing $LASTEXITCODE,
+          # so report this step's own verdict explicitly. Both failure
+          # modes already `exit 1` above -- this line only runs on success.
+          exit 0
