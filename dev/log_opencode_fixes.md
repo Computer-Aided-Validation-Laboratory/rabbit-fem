@@ -1,5 +1,14 @@
 # OpenCode CI Fixes Log
 
+## 2026-09-30 — Windows compat legs run the HEX8/HEX20 gold comparison too
+
+- **Report**: reviewer asked why Windows compat skips field comparison — it should match within floating point tolerance like the other OSes.
+- **Root cause**: no product reason; it was workflow-scope economy. The original `run-gold` step was bash-only (`if: inputs.platform != 'windows'`), so `windows-compat` pinned `run-gold: false` to avoid a second shell spelling. The comparison itself (`test/test_cube_gold.py`: temperature, disp_x/y/z, strains, mesh, time, globals vs `test/gold/*.npz`) is platform-agnostic and already runs on Windows in the primary build job's suite (Python 3.13) — only the 3.10–3.14 compat legs skipped it.
+- **Fix**: new pwsh `Smoke (windows): Gold regression (HEX8 + HEX20)` step in `smoke.yml` (same `-k "HEX8 or HEX20"` selection and tolerances, `throw` on nonzero exit, no masked errors) plus conditional `pytest numpy netCDF4` install in the Windows smoke venv; `windows-compat` now passes `run-gold: true`. Tolerances deliberately unchanged (`FIELD_RTOL=1e-5`, `FIELD_ATOL=1e-8`): the solver converges to ~1e-6 and the order of slack covers cross-platform BLAS differences (MSVC vs clang). Tightening to 1e-6 needs passing-margin evidence first — the newly-enabled Windows legs will provide it.
+- **Files changed**: `.github/workflows/smoke.yml`, `.github/workflows/windows_build_and_test.yml`, `dev/log_opencode_fixes.md`.
+- **Verification**: workflow YAML parses; unit suite unaffected (no product/test-code change). Live proof is the next PR round (Windows compat legs executing the gold step).
+- **Remaining uncertainty**: whether all Windows interp legs pass at 1e-5 (expected yes — primary already does on 3.13); if margins are wide, a follow-up can evaluate 1e-6.
+
 ## 2026-09-30 — Python 3.10 floor + cross-version compat matrix + macOS re-sign/diagnostics (colleague Mac reports)
 
 - **Reports**: (1) system Python 3.9 venv dies at import with `TypeError: unsupported operand type(s) for |` from `rabbit/sims/simulations.py:293` (`geo_path: Path | str`); (2) conda/brew Pythons 3.12–3.14 (plus venvs off them) die with `zsh: killed rabbit ...` even for bare `rabbit` (also `cube_thermomech_HEX20.i`).

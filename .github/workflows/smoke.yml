@@ -199,6 +199,9 @@ jobs:
           $SmokePython = "$env:RUNNER_TEMP\rabbit-smoke\Scripts\python.exe"
           $Wheel = (Get-ChildItem dist/*.whl | Select-Object -First 1).FullName
           uv pip install --python $SmokePython $Wheel
+          if ("${{ inputs.run-gold }}" -eq "true") {
+            uv pip install --python $SmokePython pytest numpy netCDF4
+          }
           Remove-Item Env:\MOOSE_DIR -ErrorAction SilentlyContinue
           Remove-Item Env:\PETSC_DIR -ErrorAction SilentlyContinue
           Remove-Item Env:\LIBMESH_DIR -ErrorAction SilentlyContinue
@@ -214,3 +217,15 @@ jobs:
           } finally {
             Pop-Location
           }
+
+      - name: "Smoke (windows): Gold regression (HEX8 + HEX20)"
+        if: inputs.platform == 'windows' && inputs.run-gold
+        run: |
+          # Same comparison as the linux/macos gold step, pwsh spelling:
+          # fresh solves vs committed snapshots in test/gold/ (tolerances
+          # in test/test_cube_gold.py). Sparse checkout from the gold-only
+          # checkout step keeps the clean-machine invariant (moose/ is
+          # gitignored, so no in-tree fallback paths exist).
+          Set-Location $env:GITHUB_WORKSPACE
+          & "$env:RUNNER_TEMP\rabbit-smoke\Scripts\python.exe" -m pytest test/test_cube_gold.py -k "HEX8 or HEX20" -v
+          if ($LASTEXITCODE -ne 0) { throw "Gold regression failed" }

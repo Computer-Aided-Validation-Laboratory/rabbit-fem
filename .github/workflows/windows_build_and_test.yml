@@ -263,9 +263,8 @@ jobs:
       runner: windows-latest
 
   # Python-version compat (Windows wheel): install + --version + solve
-  # per interpreter. Gold comparison stays off here (pwsh/pytest
-  # duplication); it is covered by the Linux/macOS compat legs and the
-  # full suite in the primary build job.
+  # per interpreter, plus the same HEX8/HEX20 gold comparison the
+  # Linux/macOS legs run (same tolerances in test/test_cube_gold.py).
   windows-compat:
     name: "Windows: Wheel compat (py ${{ matrix.python }})"
     needs: windows-build-and-test
@@ -279,7 +278,7 @@ jobs:
       artifact: rabbit-fem-windows-wheel
       runner: windows-latest
       python-version: ${{ matrix.python }}
-      run-gold: false
+      run-gold: true
 
   # Negative leg for the 3.9 report on Windows (pwsh spelling of the
   # same floor assertion as linux-floor; no build artifact needed).
