@@ -188,7 +188,7 @@ Mesh.ElementOrder = elem_order;
 Mesh.SecondOrderIncomplete = second_ord_incomp;
 
 Mesh 3;
-
+2
 //------------------------------------------------------------------------------
 // Save and exit
 Save Str(file_name);
