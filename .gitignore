@@ -44,8 +44,13 @@ zig-out/
 *.e-s*
 *.csv
 !src/rabbit/sims/**/*.csv
+# Packaged simulation meshes ship in the wheel (hatch honors these
+# negations when selecting package files); solver outputs elsewhere
+# stay ignored.
+!src/rabbit/sims/**/*.e
 *~
 *.msh
+!src/rabbit/sims/**/*.msh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

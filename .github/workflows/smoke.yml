@@ -189,8 +189,9 @@ jobs:
           # the default smoke case; HEX20 is the colleague's failing
           # case. The full six-element matrix runs in the build job's
           # test suite (Python 3.13); these two bound compat-leg time.
+          # The EM gold covers the electromagnetics module the same way.
           cd "$GITHUB_WORKSPACE"
-          /tmp/rabbit-smoke/bin/python -m pytest test/test_cube_gold.py -k "HEX8 or HEX20" -v
+          /tmp/rabbit-smoke/bin/python -m pytest test/test_cube_gold.py -k "HEX8 or HEX20" test/test_em_gold.py -v
 
       - name: "Smoke (windows): Install wheel in clean venv and solve"
         if: inputs.platform == 'windows'
@@ -227,5 +228,5 @@ jobs:
           # checkout step keeps the clean-machine invariant (moose/ is
           # gitignored, so no in-tree fallback paths exist).
           Set-Location $env:GITHUB_WORKSPACE
-          & "$env:RUNNER_TEMP\rabbit-smoke\Scripts\python.exe" -m pytest test/test_cube_gold.py -k "HEX8 or HEX20" -v
+          & "$env:RUNNER_TEMP\rabbit-smoke\Scripts\python.exe" -m pytest test/test_cube_gold.py -k "HEX8 or HEX20" test/test_em_gold.py -v
           if ($LASTEXITCODE -ne 0) { throw "Gold regression failed" }

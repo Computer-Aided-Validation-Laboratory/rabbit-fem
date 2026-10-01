@@ -61,9 +61,21 @@ class ExodusData:
 
 
 def _decode_names(raw: np.ndarray) -> list[str]:
-    """Decode a 2D Exodus char array into a list of names."""
-    chars = raw.view(f"S{raw.shape[-1]}").reshape(raw.shape[:-1])
-    return [str(s).strip() for s in np.char.decode(chars, "utf-8")]
+    """Decode a 2D Exodus char array into a list of names.
+
+    Names are NUL-terminated; bytes past the first NUL are padding that
+    writers do not always zero (observed heap garbage after short
+    vector-component names in EM output), so truncate there before
+    decoding. Content before the NUL still decodes strictly.
+    """
+    rows = np.ascontiguousarray(raw).reshape(raw.shape[0], -1)
+    names = []
+    for row in rows:
+        # tobytes (not tolist: numpy drops NULs when converting S1
+        # scalars to bytes) preserves the terminator for truncation.
+        text = row.tobytes().split(b"\x00", 1)[0]
+        names.append(text.decode("utf-8").strip())
+    return names
 
 
 def _read_names(dataset: nc.Dataset, key: str) -> list[str] | None:

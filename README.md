@@ -1,6 +1,6 @@
 # Rabbit Finite Element Modelling
 
-`rabbit-fem` is a lightweight, standalone Python distribution of the [MOOSE](https://mooseframework.inl.gov/) (Multiphysics Object-Oriented Simulation Environment) finite element framework, tailored specifically for **thermal**, **solid mechanics**, and **contact** simulation.
+`rabbit-fem` is a lightweight, standalone Python distribution of the [MOOSE](https://mooseframework.inl.gov/) (Multiphysics Object-Oriented Simulation Environment) finite element framework, tailored specifically for **thermal**, **solid mechanics**, **contact**, and **electromagnetics** simulation.
 
 Packaged as a self-contained Python wheel (~60 MB), `rabbit-fem` provides a drop-in `rabbit` command line executable and Python dataset API that runs MOOSE simulations without requiring external MOOSE or libMesh system installations.
 
@@ -8,7 +8,7 @@ Packaged as a self-contained Python wheel (~60 MB), `rabbit-fem` provides a drop
 
 ## Key Features
 
-- **Focused Thermo-Mechanical Physics**: Preconfigured with `SolidMechanics`, `HeatTransfer`, `Contact` modules.
+- **Focused Thermo-Mechanical Physics**: Preconfigured with `SolidMechanics`, `HeatTransfer`, `Contact`, and `Electromagnetics` modules.
 - **Self-Contained & Relocatable**: Ships stripped binaries and shared libraries with relocatable linkage (`$ORIGIN` RPATHs on Linux, `@loader_path` on macOS, fully static executable on Windows) and zero external MOOSE dependency at runtime.
 - **Drop-In CLI**: Execute MOOSE input files using `rabbit input.i` or `rabbit -i input.i`.
 - **Packaged Simulation Datasets**: Includes standard benchmarks and Gmsh geometry scripts accessible directly through Python.

@@ -17,9 +17,14 @@ import pytest
 from rabbit.sims import (
     EDims,
     EElemType,
+    EM_CASES,
+    MFEM_CASES,
     cube_thermomech_input_path,
     dogbone_geo_path,
     dogbone_input_path,
+    em_input_path,
+    mfem_input_path,
+    mfem_mesh_path,
     monoblock_geo_path,
     monoblock_input_path,
     plate_tensile_geo_path,
@@ -56,6 +61,13 @@ def test_dataset_paths_exist() -> None:
     assert stc_geo_path().is_file()
     assert stc_input_path("stc_therm_unifhf_wrad_std_ad").is_file()
     assert stc_data_path("ss316L_density_K.csv").is_file()
+
+    for case in EM_CASES:
+        assert em_input_path(case).is_file()
+
+    for case in MFEM_CASES:
+        assert mfem_input_path(case).is_file()
+        assert mfem_mesh_path(case).is_file()
 
 
 @pytest.mark.parametrize(

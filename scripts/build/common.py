@@ -306,6 +306,14 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
         "update",
         "--init",
         "--recursive",
+        # Some MOOSE submodules (e.g. framework/contrib/mfem and
+        # framework/contrib/conduit) set `update = none` in .gitmodules,
+        # which makes a plain update print "Skipping submodule ..."
+        # even for explicitly listed paths. An explicit --checkout
+        # overrides that default, matching what MOOSE's own dependency
+        # scripts pass. For submodules without `update = none` this is
+        # the default strategy, so behaviour is unchanged there.
+        "--checkout",
     ] + needed
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):

@@ -51,6 +51,59 @@ def detect_system_include_flags(wrapper_dir: Path) -> list[str]:
     return flags
 
 
+def check_build_tools() -> None:
+    """Fail early if required build tools are missing from PATH.
+
+    libMesh's bundled dependencies shell out to ``m4`` during configure,
+    and the default make target compiles module test plugins from
+    Fortran sources (without a Fortran compiler the build dies with a
+    cryptic ``make: no: No such file or directory`` from libtool).
+    Only tools proven required are gated here.
+    """
+    import shutil
+
+    missing = [t for t in ("m4", "gfortran") if shutil.which(t) is None]
+    if missing:
+        raise RuntimeError(
+            "Required build tools not found on PATH: "
+            + ", ".join(missing)
+            + ". Install them (e.g. `sudo apt-get install -y m4 gfortran` "
+            "on Ubuntu) and retry."
+        )
+
+
+def check_xdr_headers(zigcc_path: Path) -> None:
+    """Fail early if no XDR (rpc) headers are visible to the toolchain.
+
+    MOOSE's ``configure_libmesh.sh`` hardcodes ``--enable-xdr-required``,
+    so a libMesh configure without XDR headers dies deep in the build
+    with ``configure: error: *** XDR was not found``. Probe with the
+    actual wrapper compiler instead of checking fixed paths: headers may
+    legitimately come from the system (``libtirpc-dev``), a conda prefix,
+    or ``CPATH``. Anything the probe cannot compile, libMesh cannot use.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="rabbit-xdr-probe-") as tmp:
+        src = Path(tmp) / "xdr_probe.c"
+        src.write_text(
+            '#include <rpc/rpc.h>\nint main(void) { return 0; }\n',
+            encoding="utf-8",
+        )
+        res = subprocess.run(
+            [str(zigcc_path), "-c", str(src), "-o", str(Path(tmp) / "x.o")],
+            capture_output=True,
+            text=True,
+        )
+    if res.returncode != 0:
+        raise RuntimeError(
+            "XDR (rpc) headers not found by the build compiler. "
+            "libMesh requires them (MOOSE passes --enable-xdr-required). "
+            "Install the system package (e.g. "
+            "`sudo apt-get install -y libtirpc-dev` on Ubuntu) and retry."
+        )
+
+
 def setup_linux_toolchain(repo_dir: Path) -> tuple[Path, Path]:
     """Create wrapper scripts for zig cc / clang toolchain on Linux."""
     wrapper_dir = repo_dir / ".zig_wrappers"
@@ -304,6 +357,8 @@ def build_libmesh(
     """Build libMesh dependency on Linux."""
     ensure_moose_repo(repo_dir, moose_dir)
     ensure_moose_submodules(moose_dir)
+    check_build_tools()
+    check_xdr_headers(zigcc_path)
     libmesh_lib = (
         moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.so"
     )
