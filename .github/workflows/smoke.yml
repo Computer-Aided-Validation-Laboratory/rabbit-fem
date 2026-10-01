@@ -172,6 +172,12 @@ jobs:
             env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH mpirun -n 2 "$SMOKE_BIN" -i "$INPUT" Executioner/end_time=1
             ls -la /tmp/rabbit-smoke-mpi-run/*.e
             echo "MPI smoke solve OK"
+            # MPI wheel with the MFEM backend: prove the packaged Maxwell
+            # case converges (singleton rank keeps partitioning
+            # deterministic; serial legs never reach this branch).
+            mkdir -p /tmp/rabbit-smoke-mfem-run && cd /tmp/rabbit-smoke-mfem-run
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_input_path, mfem_mesh_path, run_rabbit; r = run_rabbit(mfem_input_path('curlcurl'), extra_args=['Mesh/file=' + str(mfem_mesh_path('curlcurl'))]); assert r.returncode == 0; print('MFEM smoke solve OK')"
+            ls -la /tmp/rabbit-smoke-mfem-run/OutputData/CurlCurl/*.csv
           else
             # Serial wheel: prove SMP threading parallelises. This step
             # runs on Linux/macOS only (the whole step is skipped on

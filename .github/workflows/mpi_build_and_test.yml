@@ -121,6 +121,28 @@ jobs:
           path: moose/libmesh/installed
           key: linux-mpi-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
+      - name: "MPI: Restore Conduit cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: conduit-cache
+        with:
+          path: moose/framework/contrib/conduit/installed
+          key: linux-mpi-conduit-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPI: Build Conduit"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.conduit-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
+        run: |
+          uv run python build_rabbit.py --build-conduit
+
+      - name: "MPI: Save Conduit cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.conduit-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: moose/framework/contrib/conduit/installed
+          key: linux-mpi-conduit-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
       - name: "MPI: Restore WASP cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
@@ -146,6 +168,28 @@ jobs:
             moose/framework/contrib/wasp/install
             moose/framework/contrib/hit
           key: linux-mpi-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPI: Restore MFEM cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mfem-cache
+        with:
+          path: moose/framework/contrib/mfem/installed
+          key: linux-mpi-mfem-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPI: Build MFEM"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mfem-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
+        run: |
+          uv run python build_rabbit.py --build-mfem
+
+      - name: "MPI: Save MFEM cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mfem-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: moose/framework/contrib/mfem/installed
+          key: linux-mpi-mfem-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       - name: "MPI: Restore MOOSE Config cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'

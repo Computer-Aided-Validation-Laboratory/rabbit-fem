@@ -61,6 +61,8 @@ _MOOSE_DEP_SUBMODULES = {
     "petsc": "petsc",
     "libmesh": "libmesh",
     "wasp": "framework/contrib/wasp",
+    "mfem": "framework/contrib/mfem",
+    "conduit": "framework/contrib/conduit",
 }
 
 
@@ -270,6 +272,27 @@ def is_wasp_ready(moose_dir: Path) -> bool:
     )
 
 
+def is_conduit_ready(moose_dir: Path) -> bool:
+    """Check if Conduit source or build is present."""
+    conduit_dir = moose_dir / "framework" / "contrib" / "conduit"
+    return (
+        (conduit_dir / "installed" / "lib").is_dir()
+        or (conduit_dir / "installed" / "include").is_dir()
+        or (conduit_dir / "src" / "CMakeLists.txt").is_file()
+        or (conduit_dir / "CMakeLists.txt").is_file()
+    )
+
+
+def is_mfem_ready(moose_dir: Path) -> bool:
+    """Check if MFEM source or build is present."""
+    mfem_dir = moose_dir / "framework" / "contrib" / "mfem"
+    return (
+        (mfem_dir / "installed" / "lib").is_dir()
+        or (mfem_dir / "installed" / "include").is_dir()
+        or (mfem_dir / "CMakeLists.txt").is_file()
+    )
+
+
 def ensure_moose_submodules(moose_dir: Path) -> None:
     """Check and initialize missing MOOSE git submodules."""
     needed: list[str] = []
@@ -279,6 +302,10 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
         needed.append("libmesh")
     if not is_wasp_ready(moose_dir):
         needed.append("framework/contrib/wasp")
+    if not is_conduit_ready(moose_dir):
+        needed.append("framework/contrib/conduit")
+    if not is_mfem_ready(moose_dir):
+        needed.append("framework/contrib/mfem")
 
     if not needed:
         print("All MOOSE submodules/dependencies are present.")
@@ -306,6 +333,13 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
         "update",
         "--init",
         "--recursive",
+        # framework/contrib/mfem and framework/contrib/conduit set
+        # `update = none` in .gitmodules, which makes a plain update
+        # print "Skipping submodule ..." even for explicitly listed
+        # paths. An explicit --checkout overrides that default, matching
+        # what MOOSE's own update_and_rebuild_{mfem,conduit}.sh scripts
+        # pass. For other submodules this is the default strategy.
+        "--checkout",
     ] + needed
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):

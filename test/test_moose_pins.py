@@ -19,6 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from build.common import (
+    ensure_moose_submodules,
     get_pinned_moose_deps,
     get_pinned_moose_version,
     verify_moose_deps,
@@ -118,3 +119,40 @@ def test_verify_warns_on_unverifiable_checkout(
     )
     verify_moose_deps(moose_dir, tmp_path)
     assert "cannot verify" in capsys.readouterr().out
+
+
+def test_ensure_overrides_update_none_submodules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ensure must pass --checkout so update=none submodules materialize.
+
+    Some MOOSE submodules (framework/contrib/mfem and
+    framework/contrib/conduit) set ``update = none`` in .gitmodules, for
+    which a plain ``git submodule update`` prints "Skipping submodule
+    ..." even for explicitly listed paths.
+    """
+    import build.common as common
+
+    moose_dir = tmp_path / "moose"
+    moose_dir.mkdir()
+    commands: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> object:
+        commands.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(common.subprocess, "run", fake_run)
+    monkeypatch.setattr(common.time, "sleep", lambda *_: None)
+    ensure_moose_submodules(moose_dir)
+
+    updates = [c for c in commands if c[:3] == ["git", "submodule", "update"]]
+    assert len(updates) == 1
+    assert "--checkout" in updates[0]
+    for sub in (
+        "petsc",
+        "libmesh",
+        "framework/contrib/wasp",
+        "framework/contrib/conduit",
+        "framework/contrib/mfem",
+    ):
+        assert sub in updates[0]
