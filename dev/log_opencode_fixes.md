@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-02 — Windows: XDR fallback test used non-portable path compare (PR #10)
+
+- **CI run**: Windows `36982854740`, step `Run test suite`: `1 failed, 90 passed, 4 skipped` — the single failure is `test_linux_xdr_probe_falls_back_to_system_tirpc_include` (my own test from the Linux XDR fix, not product code).
+- **Root cause**: test-harness portability bug. The test mocked `Path.is_dir` with `str(self) == "/usr/include/tirpc"`, but `str(WindowsPath)` renders backslashes (`\usr\include\tirpc`), so the comparison is False on Windows, the tirpc candidate is skipped, and the probe raises. Classic `/` vs `\` defect; proven locally with `PureWindowsPath` (`str` mismatches, `as_posix()` matches).
+- **Fix (test-only)**: the probe-loop test now monkeypatches `_xdr_include_candidates` to a deterministic `[[], ["-I/usr/include/tirpc"]]` (no filesystem mock at all); candidate-builder coverage moved to a new test using `self.as_posix() == ...`, which normalizes separators on every platform. Assertions unchanged in strength.
+- **Platform considerations**: test-only change; production `check_xdr_headers` already behaves correctly on Windows (the tirpc dir never exists there, so the candidate is skipped). Linux/macOS behavior unchanged.
+- **Files changed**: `test/test_build_env.py`, `dev/log_opencode_fixes.md`.
+- **Verification**: 25 passed (`test_build_env` + `test_moose_pins`) locally; `PureWindowsPath` simulation confirms old compare fails / new one matches. Live proof is the next Windows round (full suite green).
+- **Remaining uncertainty**: none on mechanism.
+
 ## 2026-10-02 — MPI/MFEM vs serial variant isolation (PR #10 follow-up)
 
 - **Context**: serial Linux `Build PETSc` log showed `Initializing missing MOOSE git submodules: ['petsc', 'libmesh', 'framework/contrib/wasp', 'framework/contrib/conduit', 'framework/contrib/mfem']` — the serial build was fetching MFEM/Conduit sources it never compiles against.

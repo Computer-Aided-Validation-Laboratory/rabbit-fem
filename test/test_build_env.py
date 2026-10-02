@@ -233,14 +233,34 @@ def test_linux_xdr_probe_falls_back_to_system_tirpc_include(
         return subprocess.CompletedProcess(args[0], 1, "", "fatal error")
 
     monkeypatch.setattr(linux_mod.subprocess, "run", fake_run)
+    # Deterministic candidates: exercise the probe loop without any
+    # filesystem dependence (no Path.is_dir mock, which is a
+    # `/` vs `\` portability trap on Windows).
     monkeypatch.setattr(
-        linux_mod.Path, "is_dir", lambda self: str(self) == "/usr/include/tirpc"
+        linux_mod, "_xdr_include_candidates", lambda: [[], ["-I/usr/include/tirpc"]]
     )
-    for key in ("TIRPC_DIR", "CONDA_PREFIX"):
-        monkeypatch.delenv(key, raising=False)
     linux_mod.check_xdr_headers(zigcc)
     assert len(calls) == 2
     assert "-I/usr/include/tirpc" in calls[1]
+
+
+def test_linux_xdr_candidates_include_system_tirpc_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The candidate builder offers -I/usr/include/tirpc when it exists.
+
+    `as_posix()` keeps the mock portable: `str(WindowsPath)` uses
+    backslashes, so a plain string compare against the forward-slash
+    literal never matches on Windows.
+    """
+    for key in ("TIRPC_DIR", "CONDA_PREFIX"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(
+        linux_mod.Path,
+        "is_dir",
+        lambda self: self.as_posix() == "/usr/include/tirpc",
+    )
+    assert linux_mod._xdr_include_candidates() == [[], ["-I/usr/include/tirpc"]]
 
 
 def _record_stages(
