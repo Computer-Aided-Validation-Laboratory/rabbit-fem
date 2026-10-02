@@ -99,6 +99,9 @@ Write-Host "[OK] Zig compiler found: $ZigExe" -ForegroundColor Green
 $driveLetter = $RepoRoot.Substring(0, 1).ToLower()
 $pathRest = $RepoRoot.Substring(2).Replace('\', '/')
 $RepoRootPosix = "/$driveLetter$pathRest"
+$MsysDriveLetter = $MsysRoot.Substring(0, 1).ToLower()
+$MsysPathRest = $MsysRoot.Substring(2).Replace('\', '/')
+$MsysRootPosix = "/$MsysDriveLetter$MsysPathRest"
 
 # 5. Set up compiler wrappers
 $WrappersDir = Join-Path $RepoRoot ".zig_wrappers"
