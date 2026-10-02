@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-02 — MPI/MFEM vs serial variant isolation (PR #10 follow-up)
+
+- **Context**: serial Linux `Build PETSc` log showed `Initializing missing MOOSE git submodules: ['petsc', 'libmesh', 'framework/contrib/wasp', 'framework/contrib/conduit', 'framework/contrib/mfem']` — the serial build was fetching MFEM/Conduit sources it never compiles against.
+- **Root cause**: `ensure_moose_submodules` unconditionally required conduit+mfem, so any MFEM-side submodule/pin breakage could red the serial pipeline (and serial paid the fetch cost every cold build). Same coupling in `verify_moose_deps`, which checked MPI-only pins even for serial trees.
+- **Fix**: new `_MPI_ONLY_MOOSE_DEPS = frozenset({"mfem", "conduit"})`; `ensure_moose_submodules` and `verify_moose_deps` skip those unless `is_mpi_build()` (RABBIT_MPI=1). Serial order is byte-identical to pre-MFEM (petsc/libmesh/wasp); MPI still materializes all five. `--checkout` flag kept unconditionally (harmless for serial, required for MPI's `update = none` submodules). CI already isolates via separate runners and `-serial`/`-mpi` cache keys — this closes the script-level coupling.
+- **Platform considerations**: `scripts/build/common.py` only (shared, variant-gated — not OS-gated since MPI is Linux-only and darwin/windows callers are always serial, so they correctly skip too). No workflow/cache-key changes.
+- **Files changed**: `scripts/build/common.py`, `test/test_moose_pins.py` (MPI ensure test pinned to RABBIT_MPI=1; new serial-skip + verify isolation tests), `dev/log_opencode_fixes.md`.
+- **Verification**: 24 passed (`test_moose_pins` + `test_build_env`). Live proof: next serial round initializes only 3 submodules; next MPI round still gets all 5.
+- **Remaining uncertainty**: none on mechanism. Same-tree dual-variant local builds remain unsupported (isolation via separate checkouts/runners, per existing convention).
+
 ## 2026-10-02 — Linux XDR preflight rejected healthy libtirpc-dev layout (PR #10)
 
 - **CI run**: PR #10 Linux `36981263647`, step `Build libMesh` failed in ~1s: `RuntimeError: XDR (rpc) headers not found by the build compiler ... Install libtirpc-dev`, despite the workflow installing `libtirpc-dev`.

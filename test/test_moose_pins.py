@@ -129,10 +129,12 @@ def test_ensure_overrides_update_none_submodules(
     Some MOOSE submodules (framework/contrib/mfem and
     framework/contrib/conduit) set ``update = none`` in .gitmodules, for
     which a plain ``git submodule update`` prints "Skipping submodule
-    ..." even for explicitly listed paths.
+    ..." even for explicitly listed paths. MPI builds materialize all
+    five submodules.
     """
     import build.common as common
 
+    monkeypatch.setenv("RABBIT_MPI", "1")
     moose_dir = tmp_path / "moose"
     moose_dir.mkdir()
     commands: list[list[str]] = []
@@ -156,3 +158,80 @@ def test_ensure_overrides_update_none_submodules(
         "framework/contrib/mfem",
     ):
         assert sub in updates[0]
+
+
+def test_ensure_serial_skips_mfem_and_conduit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Serial builds must not fetch the MPI-only MFEM/Conduit submodules.
+
+    Variant isolation: a serial run fetches petsc/libmesh/wasp only, so
+    MFEM-side submodule breakage cannot red the serial pipeline (and the
+    serial recipe stays byte-identical to pre-MFEM).
+    """
+    import build.common as common
+
+    monkeypatch.delenv("RABBIT_MPI", raising=False)
+    moose_dir = tmp_path / "moose"
+    moose_dir.mkdir()
+    commands: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> object:
+        commands.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(common.subprocess, "run", fake_run)
+    monkeypatch.setattr(common.time, "sleep", lambda *_: None)
+    ensure_moose_submodules(moose_dir)
+
+    updates = [c for c in commands if c[:3] == ["git", "submodule", "update"]]
+    assert len(updates) == 1
+    for sub in ("petsc", "libmesh", "framework/contrib/wasp"):
+        assert sub in updates[0]
+    for sub in ("framework/contrib/conduit", "framework/contrib/mfem"):
+        assert sub not in updates[0]
+
+
+def test_verify_serial_ignores_mfem_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Serial verification must skip MPI-only dep pins (and vice versa)."""
+    monkeypatch.delenv("RABBIT_MPI", raising=False)
+    moose_dir = tmp_path / "moose"
+    mfem_dir = moose_dir / "framework" / "contrib" / "mfem"
+    mfem_dir.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=str(mfem_dir), check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit",
+         "-q", "--allow-empty", "-m", "init"],
+        cwd=str(mfem_dir),
+        check=True,
+    )
+    (tmp_path / "moose_deps.txt").write_text(
+        "mfem 0000000000000000000000000000000000000000\n",
+        encoding="utf-8",
+    )
+    verify_moose_deps(moose_dir, tmp_path)
+
+
+def test_verify_mpi_catches_mfem_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MPI verification must still pin the MFEM commit."""
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    moose_dir = tmp_path / "moose"
+    mfem_dir = moose_dir / "framework" / "contrib" / "mfem"
+    mfem_dir.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=str(mfem_dir), check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit",
+         "-q", "--allow-empty", "-m", "init"],
+        cwd=str(mfem_dir),
+        check=True,
+    )
+    (tmp_path / "moose_deps.txt").write_text(
+        "mfem 0000000000000000000000000000000000000000\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="mfem"):
+        verify_moose_deps(moose_dir, tmp_path)

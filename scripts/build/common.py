@@ -65,6 +65,14 @@ _MOOSE_DEP_SUBMODULES = {
     "conduit": "framework/contrib/conduit",
 }
 
+# Submodules only the MPI variant (MFEM backend) needs. The serial
+# `rabbit-fem` wheel never compiles against them, so serial builds must
+# not fetch or verify them: a serial run should stay green when an
+# MFEM/Conduit pin or submodule breaks, and vice versa. Variant
+# isolation is via `is_mpi_build()` (RABBIT_MPI=1); CI additionally
+# isolates via separate runners and `-serial`/`-mpi` cache keys.
+_MPI_ONLY_MOOSE_DEPS = frozenset({"mfem", "conduit"})
+
 
 def get_pinned_moose_deps(repo_dir: Path) -> dict[str, str]:
     """Read pinned MOOSE dependency commits from moose_deps.txt."""
@@ -95,7 +103,10 @@ def verify_moose_deps(moose_dir: Path, repo_dir: Path) -> None:
     deps = get_pinned_moose_deps(repo_dir)
     if not deps:
         return
+    mpi = is_mpi_build()
     for name, rel_path in _MOOSE_DEP_SUBMODULES.items():
+        if name in _MPI_ONLY_MOOSE_DEPS and not mpi:
+            continue
         expected = deps.get(name)
         if not expected:
             continue
@@ -294,7 +305,12 @@ def is_mfem_ready(moose_dir: Path) -> bool:
 
 
 def ensure_moose_submodules(moose_dir: Path) -> None:
-    """Check and initialize missing MOOSE git submodules."""
+    """Check and initialize missing MOOSE git submodules.
+
+    Only the MPI variant materializes the Conduit/MFEM submodules (the
+    MFEM backend is MPI-only); serial builds fetch just
+    petsc/libmesh/wasp so MFEM-side breakage cannot red a serial run.
+    """
     needed: list[str] = []
     if not is_petsc_ready(moose_dir):
         needed.append("petsc")
@@ -302,10 +318,11 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
         needed.append("libmesh")
     if not is_wasp_ready(moose_dir):
         needed.append("framework/contrib/wasp")
-    if not is_conduit_ready(moose_dir):
-        needed.append("framework/contrib/conduit")
-    if not is_mfem_ready(moose_dir):
-        needed.append("framework/contrib/mfem")
+    if is_mpi_build():
+        if not is_conduit_ready(moose_dir):
+            needed.append("framework/contrib/conduit")
+        if not is_mfem_ready(moose_dir):
+            needed.append("framework/contrib/mfem")
 
     if not needed:
         print("All MOOSE submodules/dependencies are present.")
