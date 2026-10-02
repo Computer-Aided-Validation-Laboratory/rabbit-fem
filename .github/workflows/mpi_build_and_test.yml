@@ -1,4 +1,4 @@
-name: "MPI: Build Wheel and Test"
+name: "MPI/MFEM, Linux: Build Wheel and Test"
 
 # Linux-only MPI variant of rabbit-fem (published as rabbit-fem-mpi).
 # The default wheels are serial/SMP builds; this workflow produces the
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   mpi-build-and-test:
-    name: "MPI: Build Wheel and Test"
+    name: "MPI/MFEM, Linux: Build Wheel and Test"
     runs-on: ubuntu-24.04
     timeout-minutes: 360
 
