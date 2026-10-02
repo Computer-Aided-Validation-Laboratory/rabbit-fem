@@ -112,3 +112,272 @@ def test_darwin_serial_hides_mpi_stack(
     for key in ("LIBRARY_PATH", "CPATH", "LDFLAGS", "CPPFLAGS"):
         assert "/opt/homebrew/lib" not in env[key], key
         assert "/opt/homebrew/include" not in env[key], key
+
+
+def test_linux_build_tools_pass_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tool preflight passes when all gated tools resolve on PATH."""
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    linux_mod.check_build_tools()
+
+
+def test_linux_build_tools_name_missing_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tool preflight names missing tools instead of deep build errors."""
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(RuntimeError, match="m4"):
+        linux_mod.check_build_tools()
+
+
+def test_linux_build_tools_names_fortran_when_only_it_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing Fortran compiler must be named (test plugins need it)."""
+    import shutil
+
+    def fake_which(name: str) -> str | None:
+        return None if name == "gfortran" else f"/usr/bin/{name}"
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    with pytest.raises(RuntimeError, match="gfortran"):
+        linux_mod.check_build_tools()
+
+
+def test_linux_build_tools_serial_ignores_flex_bison(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Serial builds must not require flex/bison (MPI-only PETSc need)."""
+    import shutil
+
+    def fake_which(name: str) -> str | None:
+        return None if name in ("flex", "bison") else f"/usr/bin/{name}"
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    linux_mod.check_build_tools(mpi=False)
+
+
+def test_linux_build_tools_mpi_requires_flex_bison(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MPI builds fail early naming flex/bison (PTScotch needs them)."""
+    import shutil
+
+    def fake_which(name: str) -> str | None:
+        return None if name in ("flex", "bison") else f"/usr/bin/{name}"
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    with pytest.raises(RuntimeError, match="flex"):
+        linux_mod.check_build_tools(mpi=True)
+
+
+def test_linux_xdr_probe_passes_when_headers_compile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The XDR preflight passes when the wrapper compiles <rpc/rpc.h>."""
+    import subprocess
+
+    zigcc, _ = _fake_wrappers(tmp_path)
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert str(zigcc) in args[0][0]
+        return subprocess.CompletedProcess(args[0], 0, "", "")
+
+    monkeypatch.setattr(linux_mod.subprocess, "run", fake_run)
+    linux_mod.check_xdr_headers(zigcc)
+
+
+def test_linux_xdr_probe_names_package_when_headers_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The XDR preflight fails early naming libtirpc-dev, not deep in configure."""
+    import subprocess
+
+    zigcc, _ = _fake_wrappers(tmp_path)
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args[0], 1, "", "fatal error")
+
+    monkeypatch.setattr(linux_mod.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="libtirpc-dev"):
+        linux_mod.check_xdr_headers(zigcc)
+
+
+def test_linux_xdr_probe_falls_back_to_system_tirpc_include(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The XDR preflight accepts Debian/Ubuntu libtirpc-dev layout.
+
+    Regression for the Linux CI failure where the bare
+    ``#include <rpc/rpc.h>`` probe failed despite ``libtirpc-dev`` being
+    installed: on Debian/Ubuntu the headers live under
+    ``/usr/include/tirpc`` (libMesh's own configure tries
+    ``-I/usr/include/tirpc``), so the preflight must try it too instead
+    of rejecting a healthy machine.
+    """
+    import subprocess
+
+    zigcc, _ = _fake_wrappers(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        cmd = list(args[0])
+        calls.append(cmd)
+        if "-I/usr/include/tirpc" in cmd:
+            return subprocess.CompletedProcess(args[0], 0, "", "")
+        return subprocess.CompletedProcess(args[0], 1, "", "fatal error")
+
+    monkeypatch.setattr(linux_mod.subprocess, "run", fake_run)
+    # Deterministic candidates: exercise the probe loop without any
+    # filesystem dependence (no Path.is_dir mock, which is a
+    # `/` vs `\` portability trap on Windows).
+    monkeypatch.setattr(
+        linux_mod, "_xdr_include_candidates", lambda: [[], ["-I/usr/include/tirpc"]]
+    )
+    linux_mod.check_xdr_headers(zigcc)
+    assert len(calls) == 2
+    assert "-I/usr/include/tirpc" in calls[1]
+
+
+def test_linux_xdr_candidates_include_system_tirpc_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The candidate builder offers -I/usr/include/tirpc when it exists.
+
+    `as_posix()` keeps the mock portable: `str(WindowsPath)` uses
+    backslashes, so a plain string compare against the forward-slash
+    literal never matches on Windows.
+    """
+    for key in ("TIRPC_DIR", "CONDA_PREFIX"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(
+        linux_mod.Path,
+        "is_dir",
+        lambda self: self.as_posix() == "/usr/include/tirpc",
+    )
+    assert linux_mod._xdr_include_candidates() == [[], ["-I/usr/include/tirpc"]]
+
+
+def _write_moose_config(moose_dir: Path, *, mfem_enabled: bool) -> Path:
+    """Materialize a minimal MooseConfig.h with/without the MFEM marker."""
+    cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    cfg.parent.mkdir(parents=True)
+    marker = "#define MOOSE_MFEM_ENABLED 1\n" if mfem_enabled else ""
+    cfg.write_text(f"// fake config\n{marker}", encoding="utf-8")
+    return cfg
+
+
+def test_linux_cached_config_serial_passes_through_without_vars_mk(
+    tmp_path: Path,
+) -> None:
+    """Serial configs never carry the MFEM marker, so no flags are needed."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_moose_config(moose_dir, mfem_enabled=False)
+    linux_mod.check_cached_moose_config(moose_dir)
+    assert cfg.is_file()
+
+
+def test_linux_cached_config_mfem_kept_when_flags_usable(
+    tmp_path: Path,
+) -> None:
+    """A cached MFEM config with a matching conf_vars.mk must survive."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_moose_config(moose_dir, mfem_enabled=True)
+    mfem_inc = moose_dir / "mfem" / "include"
+    mfem_inc.mkdir(parents=True)
+    (mfem_inc / "mfem.hpp").write_text("// fake\n", encoding="utf-8")
+    (moose_dir / "conf_vars.mk").write_text(
+        f"ENABLE_MFEM       := true\nMFEM_DIR          := {moose_dir / 'mfem'}\n",
+        encoding="utf-8",
+    )
+    linux_mod.check_cached_moose_config(moose_dir)
+    assert cfg.is_file()
+
+
+def test_linux_cached_config_mfem_dropped_when_vars_mk_missing(
+    tmp_path: Path,
+) -> None:
+    """MFEM decision without flags must force a fresh configure.
+
+    Regression for the MPI CI failure where a cached MooseConfig.h
+    (MFEM enabled) restored without conf_vars.mk and the framework build
+    died with 'mfem.hpp file not found'.
+    """
+    moose_dir = tmp_path / "moose"
+    cfg = _write_moose_config(moose_dir, mfem_enabled=True)
+    assert not (moose_dir / "conf_vars.mk").exists()
+    linux_mod.check_cached_moose_config(moose_dir)
+    assert not cfg.exists()
+
+
+def test_linux_cached_config_mfem_dropped_when_mfem_dir_broken(
+    tmp_path: Path,
+) -> None:
+    """A conf_vars.mk pointing at headers that do not exist must not pass."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_moose_config(moose_dir, mfem_enabled=True)
+    vars_mk = moose_dir / "conf_vars.mk"
+    vars_mk.write_text(
+        "ENABLE_MFEM       := true\nMFEM_DIR          := /nonexistent/prefix\n",
+        encoding="utf-8",
+    )
+    linux_mod.check_cached_moose_config(moose_dir)
+    assert not cfg.exists()
+    assert not vars_mk.exists()
+
+
+def _record_stages(
+    monkeypatch: pytest.MonkeyPatch, names: list[str]
+) -> list[str]:
+    """Replace build stages with recorders; return the call order log."""
+    order: list[str] = []
+
+    def make_fake(name: str) -> object:
+        def fake(*args: object, **kwargs: object) -> None:
+            order.append(name)
+
+        return fake
+
+    for name in names:
+        monkeypatch.setattr(linux_mod, name, make_fake(name))
+    return order
+
+
+_MPI_STAGE_NAMES = (
+    "build_petsc",
+    "build_libmesh",
+    "build_conduit",
+    "build_wasp",
+    "build_mfem",
+    "configure_moose",
+)
+
+
+def test_linux_mpi_builds_conduit_and_mfem_in_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MPI dependency builds include Conduit/MFEM around WASP."""
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    order = _record_stages(monkeypatch, list(_MPI_STAGE_NAMES))
+    linux_mod.build_linux_dependencies(tmp_path, tmp_path, tmp_path, tmp_path)
+    assert order == list(_MPI_STAGE_NAMES)
+
+
+def test_linux_serial_skips_conduit_and_mfem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Serial builds keep the original PETSc/libMesh/WASP/configure order."""
+    monkeypatch.delenv("RABBIT_MPI", raising=False)
+    order = _record_stages(monkeypatch, list(_MPI_STAGE_NAMES))
+    linux_mod.build_linux_dependencies(tmp_path, tmp_path, tmp_path, tmp_path)
+    assert order == [
+        "build_petsc",
+        "build_libmesh",
+        "build_wasp",
+        "configure_moose",
+    ]

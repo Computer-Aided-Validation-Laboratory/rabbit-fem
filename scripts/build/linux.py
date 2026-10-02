@@ -51,6 +51,111 @@ def detect_system_include_flags(wrapper_dir: Path) -> list[str]:
     return flags
 
 
+def check_build_tools(*, mpi: bool = False) -> None:
+    """Fail early if required build tools are missing from PATH.
+
+    libMesh's bundled dependencies shell out to ``m4`` during configure,
+    and the default make target compiles module test plugins from
+    Fortran sources (without a Fortran compiler the build dies with a
+    cryptic ``make: no: No such file or directory`` from libtool). The
+    MPI PETSc recipe additionally needs ``flex``/``bison`` (its
+    PTScotch download fails configure without them). Only tools proven
+    required are gated here.
+    """
+    import shutil
+
+    tools = ["m4", "gfortran"]
+    if mpi:
+        tools += ["flex", "bison"]
+    missing = [t for t in tools if shutil.which(t) is None]
+    if missing:
+        raise RuntimeError(
+            "Required build tools not found on PATH: "
+            + ", ".join(missing)
+            + ". Install them (e.g. `sudo apt-get install -y "
+            + " ".join(missing)
+            + "` on Ubuntu) and retry."
+        )
+
+
+def _xdr_include_candidates() -> list[list[str]]:
+    """Candidate -I flag sets for the XDR header probe.
+
+    Mirrors libMesh's own ``CONFIGURE_XDR`` fallback order: a bare
+    compile first (glibc sunrpc, conda prefix already on ``CPATH``, or
+    caller-provided ``CPPFLAGS``), then the documented system tirpc
+    location (``libtirpc-dev`` on Debian/Ubuntu, same ``-I`` libMesh
+    tries). Env-derived prefixes (``TIRPC_DIR``, ``CONDA_PREFIX``) are
+    preferred over the system path, matching MOOSE's
+    ``configure_libmesh.sh`` handling. Entries whose directories do not
+    exist are skipped so no bogus ``-I`` is passed.
+    """
+    candidates: list[list[str]] = [[]]
+    seen: set[str] = set()
+    extra_dirs: list[str] = []
+    tirpc_dir = os.environ.get("TIRPC_DIR", "")
+    if tirpc_dir:
+        extra_dirs.append(tirpc_dir)
+    conda_prefix = os.environ.get("CONDA_PREFIX", "")
+    if conda_prefix:
+        extra_dirs.append(str(Path(conda_prefix) / "include" / "tirpc"))
+    # Documented system location (what libMesh itself falls back to).
+    extra_dirs.append("/usr/include/tirpc")
+    for inc_dir in extra_dirs:
+        if not inc_dir or inc_dir in seen:
+            continue
+        seen.add(inc_dir)
+        if Path(inc_dir).is_dir():
+            candidates.append([f"-I{inc_dir}"])
+    return candidates
+
+
+def check_xdr_headers(zigcc_path: Path) -> None:
+    """Fail early if no XDR (rpc) headers are visible to the toolchain.
+
+    MOOSE's ``configure_libmesh.sh`` hardcodes ``--enable-xdr-required``,
+    so a libMesh configure without XDR headers dies deep in the build
+    with ``configure: error: *** XDR was not found``. Probe with the
+    actual wrapper compiler instead of checking fixed paths: headers may
+    legitimately come from the system (``libtirpc-dev``), a conda prefix,
+    or ``CPATH``. Anything the probe cannot compile, libMesh cannot use.
+
+    The probe mirrors libMesh's fallback: a bare ``#include <rpc/rpc.h>``
+    first, then the same ``-I/usr/include/tirpc`` libMesh tries (plus any
+    ``TIRPC_DIR``/conda prefix from the environment).
+    """
+    import tempfile
+
+    candidates = _xdr_include_candidates()
+    with tempfile.TemporaryDirectory(prefix="rabbit-xdr-probe-") as tmp:
+        src = Path(tmp) / "xdr_probe.c"
+        src.write_text(
+            '#include <rpc/rpc.h>\nint main(void) { return 0; }\n',
+            encoding="utf-8",
+        )
+        for extra_flags in candidates:
+            res = subprocess.run(
+                [
+                    str(zigcc_path),
+                    "-c",
+                    str(src),
+                    "-o",
+                    str(Path(tmp) / "x.o"),
+                    *extra_flags,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode == 0:
+                return
+    raise RuntimeError(
+        "XDR (rpc) headers not found by the build compiler. "
+        "libMesh requires them (MOOSE passes --enable-xdr-required). "
+        "Install the system package (e.g. "
+        "`sudo apt-get install -y libtirpc-dev` on Ubuntu) and retry."
+    )
+
+
 def setup_linux_toolchain(repo_dir: Path) -> tuple[Path, Path]:
     """Create wrapper scripts for zig cc / clang toolchain on Linux."""
     wrapper_dir = repo_dir / ".zig_wrappers"
@@ -208,6 +313,7 @@ def build_petsc(
     """Build PETSc dependency on Linux."""
     ensure_moose_repo(repo_dir, moose_dir)
     ensure_moose_submodules(moose_dir)
+    check_build_tools(mpi=is_mpi_build())
     petsc_built = (
         (moose_dir / "petsc" / "arch-moose" / "lib" / "libpetsc.so").is_file()
         or (
@@ -304,6 +410,8 @@ def build_libmesh(
     """Build libMesh dependency on Linux."""
     ensure_moose_repo(repo_dir, moose_dir)
     ensure_moose_submodules(moose_dir)
+    check_build_tools()
+    check_xdr_headers(zigcc_path)
     libmesh_lib = (
         moose_dir / "libmesh" / "installed" / "lib" / "libmesh_opt.so"
     )
@@ -358,6 +466,122 @@ def build_wasp(
         print("[OK] WASP parser already built.")
 
 
+def build_conduit(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build Conduit I/O library on Linux (required by MFEM)."""
+    ensure_moose_repo(repo_dir, moose_dir)
+    ensure_moose_submodules(moose_dir)
+    conduit_install = (
+        moose_dir / "framework" / "contrib" / "conduit" / "installed"
+    )
+    if not (conduit_install / "lib").is_dir():
+        print("--> Building Conduit...")
+        tool_env = get_linux_tool_env(zigcc_path, zigcxx_path)
+        subprocess.run(
+            ["./scripts/update_and_rebuild_conduit.sh"],
+            cwd=str(moose_dir),
+            env=tool_env,
+            check=True,
+        )
+    else:
+        print("[OK] Conduit already built.")
+
+
+def build_mfem(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Build MFEM backend on Linux via MOOSE's installer script.
+
+    Only the MPI variant is supported: upstream MOOSE's MFEM layer is
+    written exclusively against parallel MFEM (``ParMesh`` and friends),
+    so a serial MFEM cannot satisfy the framework compile.
+    """
+    ensure_moose_repo(repo_dir, moose_dir)
+    ensure_moose_submodules(moose_dir)
+    if not is_mpi_build():
+        raise RuntimeError(
+            "MFEM backend builds require the MPI variant (RABBIT_MPI=1); "
+            "MOOSE has no serial-MFEM path."
+        )
+    mfem_lib_dir = (
+        moose_dir / "framework" / "contrib" / "mfem" / "installed" / "lib"
+    )
+    # moose.mk links both -lmfem-opt and -lmfem-common-opt; both must
+    # exist or the framework build fails, so both gate the short-circuit.
+    if (mfem_lib_dir / "libmfem-opt.so").is_file() and (
+        mfem_lib_dir / "libmfem-common-opt.so"
+    ).is_file():
+        print("[OK] MFEM already built.")
+        return
+    print("--> Building MFEM backend...")
+    tool_env = get_linux_tool_env(zigcc_path, zigcxx_path)
+    tool_env["METHODS"] = "opt"
+    # MFEM's CMake runs find_package(MPI), whose Fortran leg needs an
+    # MPI Fortran compiler (plain gfortran leaves MPI_Fortran_* empty
+    # and the configure fails). CC/CXX already select the MPI C/C++
+    # wrappers via get_linux_tool_env.
+    tool_env["FC"] = "mpif90"
+    subprocess.run(
+        ["./scripts/update_and_rebuild_mfem.sh"],
+        cwd=str(moose_dir),
+        env=tool_env,
+        check=True,
+    )
+
+
+def check_cached_moose_config(moose_dir: Path) -> None:
+    """Remove a stale cached MOOSE config whose MFEM flags disagree.
+
+    Only MooseConfig.h is cached, never the generated conf_vars.mk that
+    carries ENABLE_MFEM/MFEM_DIR (moose.mk includes MFEM via
+    $(MFEM_DIR)/share/mfem/config.mk). If the cached header enables the
+    MFEM backend but the flags file is missing or its MFEM_DIR holds no
+    mfem.hpp, delete both so configure below re-runs fresh instead of
+    failing deep in the framework build with 'mfem.hpp file not found'.
+    Serial headers never define MOOSE_MFEM_ENABLED, so serial runs pass
+    through untouched.
+    """
+    cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    if not cfg.is_file():
+        return
+    try:
+        text = cfg.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if "MOOSE_MFEM_ENABLED" not in text:
+        return
+    vars_mk = moose_dir / "conf_vars.mk"
+    usable = False
+    if vars_mk.is_file():
+        try:
+            vars_text = vars_mk.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            vars_text = ""
+        for line in vars_text.splitlines():
+            if line.startswith("MFEM_DIR"):
+                _, _, value = line.partition(":=")
+                mfem_dir = value.strip()
+                usable = bool(mfem_dir) and (
+                    Path(mfem_dir) / "include" / "mfem.hpp"
+                ).is_file()
+                break
+    if not usable:
+        print(
+            "Cached MOOSE config enables MFEM without usable flags; "
+            "removing to force a fresh configure..."
+        )
+        cfg.unlink()
+        if vars_mk.is_file():
+            vars_mk.unlink()
+
+
 def configure_moose(
     repo_dir: Path,
     moose_dir: Path,
@@ -366,14 +590,18 @@ def configure_moose(
 ) -> None:
     """Configure MOOSE framework on Linux."""
     ensure_moose_repo(repo_dir, moose_dir)
+    check_cached_moose_config(moose_dir)
     moose_cfg = (
         moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
     )
     if not moose_cfg.is_file():
         print("--> Configuring MOOSE...")
         tool_env = get_linux_tool_env(zigcc_path, zigcxx_path)
+        # The MFEM backend is MPI-only (upstream MOOSE has no serial
+        # path); serial configures exactly as before.
+        mfem_args = ["--with-mfem"] if is_mpi_build() else []
         subprocess.run(
-            ["./configure", "--with-derivative-size=89"],
+            ["./configure", "--with-derivative-size=89", *mfem_args],
             cwd=str(moose_dir),
             env=tool_env,
             check=True,
@@ -398,7 +626,13 @@ def build_linux_dependencies(
 
     build_petsc(repo_dir, moose_dir, zigcc_path, zigcxx_path)
     build_libmesh(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    # Conduit/MFEM serve the MPI-only MFEM backend; the serial order is
+    # unchanged.
+    if is_mpi_build():
+        build_conduit(repo_dir, moose_dir, zigcc_path, zigcxx_path)
     build_wasp(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    if is_mpi_build():
+        build_mfem(repo_dir, moose_dir, zigcc_path, zigcxx_path)
     configure_moose(repo_dir, moose_dir, zigcc_path, zigcxx_path)
 
     print("=" * 60)

@@ -1,5 +1,45 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-02 — MPI/MFEM: cached MooseConfig.h without conf_vars.mk (PR #10)
+
+- **CI run**: MPI/MFEM run `36992181427`, step `Build Rabbit, stage artifacts, and build wheel`: framework compile dies with `Moose.h:378: fatal error: 'mfem.hpp' file not found`, while every dep cache (PETSc/libMesh/Conduit/WASP/MFEM/MooseConfig) reported `Cache hit`.
+- **Root cause**: cache-restore/build-script interaction, same class as the Sep-25 macOS PNG fix. The MOOSE-config cache stores only `MooseConfig.h` (the MFEM *decision*), never the generated `conf_vars.mk` that carries the matching `ENABLE_MFEM`/`MFEM_DIR` *flags* (moose.mk pulls MFEM via `$(MFEM_DIR)/share/mfem/config.mk`). On the fresh runner the restored header defines `MOOSE_MFEM_ENABLED` but `MFEM_DIR` is empty, so no `-I` reaches the compiler. Proven in the log: all six `-mpi-` keys hit, `Configure MOOSE` skipped, `conf_vars.mk` in no cache path and never mentioned. Sibling-run cache sharing under identical keys (same code) rules out cross-version poisoning.
+- **Fix (structural, MPI-scoped)**: (1) `mpi_build_and_test.yml` caches `moose/conf_vars.mk` with the header (restore+save), so decision and flags travel together; (2) new `check_cached_moose_config()` in `linux.py`, called from `configure_moose`, deletes both files when the header claims MFEM but `conf_vars.mk` is missing or its `MFEM_DIR/include/mfem.hpp` does not exist — self-healing against already-poisoned saves. Serial headers never define the marker, so serial runs pass through byte-identical (variant isolation preserved). Workflow file is not hashed into dep keys, so no extra rebuilds beyond the one fresh configure.
+- **De-poisoning**: deleted the header-only `linux-mpi-mooseconfig-efa943...` cache entry so the next run configures fresh and saves both files (old-recipe orphans remain unreachable).
+- **Files changed**: `scripts/build/linux.py`, `test/test_build_env.py` (4 guard tests), `.github/workflows/mpi_build_and_test.yml`, `dev/log_opencode_fixes.md`.
+- **Verification**: 19/19 `test_build_env` pass; live proof is the next MPI round (configure re-runs once, then `mfem.hpp` resolves and the framework links).
+- **Remaining uncertainty**: none on mechanism.
+
+## 2026-10-02 — Windows: XDR fallback test used non-portable path compare (PR #10)
+
+- **CI run**: Windows `36982854740`, step `Run test suite`: `1 failed, 90 passed, 4 skipped` — the single failure is `test_linux_xdr_probe_falls_back_to_system_tirpc_include` (my own test from the Linux XDR fix, not product code).
+- **Root cause**: test-harness portability bug. The test mocked `Path.is_dir` with `str(self) == "/usr/include/tirpc"`, but `str(WindowsPath)` renders backslashes (`\usr\include\tirpc`), so the comparison is False on Windows, the tirpc candidate is skipped, and the probe raises. Classic `/` vs `\` defect; proven locally with `PureWindowsPath` (`str` mismatches, `as_posix()` matches).
+- **Fix (test-only)**: the probe-loop test now monkeypatches `_xdr_include_candidates` to a deterministic `[[], ["-I/usr/include/tirpc"]]` (no filesystem mock at all); candidate-builder coverage moved to a new test using `self.as_posix() == ...`, which normalizes separators on every platform. Assertions unchanged in strength.
+- **Platform considerations**: test-only change; production `check_xdr_headers` already behaves correctly on Windows (the tirpc dir never exists there, so the candidate is skipped). Linux/macOS behavior unchanged.
+- **Files changed**: `test/test_build_env.py`, `dev/log_opencode_fixes.md`.
+- **Verification**: 25 passed (`test_build_env` + `test_moose_pins`) locally; `PureWindowsPath` simulation confirms old compare fails / new one matches. Live proof is the next Windows round (full suite green).
+- **Remaining uncertainty**: none on mechanism.
+
+## 2026-10-02 — MPI/MFEM vs serial variant isolation (PR #10 follow-up)
+
+- **Context**: serial Linux `Build PETSc` log showed `Initializing missing MOOSE git submodules: ['petsc', 'libmesh', 'framework/contrib/wasp', 'framework/contrib/conduit', 'framework/contrib/mfem']` — the serial build was fetching MFEM/Conduit sources it never compiles against.
+- **Root cause**: `ensure_moose_submodules` unconditionally required conduit+mfem, so any MFEM-side submodule/pin breakage could red the serial pipeline (and serial paid the fetch cost every cold build). Same coupling in `verify_moose_deps`, which checked MPI-only pins even for serial trees.
+- **Fix**: new `_MPI_ONLY_MOOSE_DEPS = frozenset({"mfem", "conduit"})`; `ensure_moose_submodules` and `verify_moose_deps` skip those unless `is_mpi_build()` (RABBIT_MPI=1). Serial order is byte-identical to pre-MFEM (petsc/libmesh/wasp); MPI still materializes all five. `--checkout` flag kept unconditionally (harmless for serial, required for MPI's `update = none` submodules). CI already isolates via separate runners and `-serial`/`-mpi` cache keys — this closes the script-level coupling.
+- **Platform considerations**: `scripts/build/common.py` only (shared, variant-gated — not OS-gated since MPI is Linux-only and darwin/windows callers are always serial, so they correctly skip too). No workflow/cache-key changes.
+- **Files changed**: `scripts/build/common.py`, `test/test_moose_pins.py` (MPI ensure test pinned to RABBIT_MPI=1; new serial-skip + verify isolation tests), `dev/log_opencode_fixes.md`.
+- **Verification**: 24 passed (`test_moose_pins` + `test_build_env`). Live proof: next serial round initializes only 3 submodules; next MPI round still gets all 5.
+- **Remaining uncertainty**: none on mechanism. Same-tree dual-variant local builds remain unsupported (isolation via separate checkouts/runners, per existing convention).
+
+## 2026-10-02 — Linux XDR preflight rejected healthy libtirpc-dev layout (PR #10)
+
+- **CI run**: PR #10 Linux `36981263647`, step `Build libMesh` failed in ~1s: `RuntimeError: XDR (rpc) headers not found by the build compiler ... Install libtirpc-dev`, despite the workflow installing `libtirpc-dev`.
+- **Root cause**: preflight bug, not a missing package. On Debian/Ubuntu `libtirpc-dev` ships headers under `/usr/include/tirpc` (there is no `/usr/include/rpc/rpc.h`), so a bare `#include <rpc/rpc.h>` compile always fails. libMesh's own `CONFIGURE_XDR` knows this and retries with `-I/usr/include/tirpc -ltirpc`; our `check_xdr_headers` only tried the bare compile, so it false-positived on a machine that would have built fine.
+- **Fix**: probe mirrors libMesh's fallback order via new `_xdr_include_candidates()`: bare compile first, then env-derived prefixes (`TIRPC_DIR`, `CONDA_PREFIX/include/tirpc`, matching MOOSE's `configure_libmesh.sh`) and the documented `/usr/include/tirpc` system path (same `-I` libMesh tries). Non-existent dirs are skipped, so no bogus `-I` is passed. Compile-only (`-c`) is unchanged — the link half (`-ltirpc`) stays libMesh configure's job.
+- **Platform considerations**: `scripts/build/linux.py` only; darwin/windows untouched. `/usr/include/tirpc` is a distro-documented location (also hard-coded in libMesh), not a runner-specific path; env prefixes keep conda/custom installs working via standard variables.
+- **Files changed**: `scripts/build/linux.py`, `test/test_build_env.py` (new tirpc-fallback regression test), `dev/log_opencode_fixes.md`.
+- **Verification**: 14/14 `test_build_env.py` pass (incl. new fallback + existing pass/fail probe tests); 42 passed across `test_build_env/test_moose_pins/test_variant`. Live proof is the next Linux round (preflight passes, libMesh configure runs).
+- **Remaining uncertainty**: none on mechanism. If a future image lacks both the headers and the fallback dir, the probe still fails loudly naming `libtirpc-dev`.
+
 ## 2026-09-30 — Mamba smoke legs: built wheel via conda-managed env (py 3.13, all OSes)
 
 - **Context**: CI was uv-only while colleague Mac failures were conda-based; no leg covered the conda install path (activation env vars, site-packages layout). Narrow by design, not a second matrix.

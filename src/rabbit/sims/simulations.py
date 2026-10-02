@@ -285,6 +285,72 @@ def stc_data_path(filename: str) -> Path:
 
 
 # ------------------------------------------------------------------------------
+# MFEM Backend Cases (require an MFEM-enabled MPI binary)
+# ------------------------------------------------------------------------------
+
+#: Packaged MFEM inputs (from MOOSE test/tests/mfem at the pinned
+#: commit). Mesh files ship alongside; pass an absolute mesh path via
+#: ``Mesh/file=...`` so the solve never depends on the input's
+#: directory layout.
+MFEM_CASES = (
+    "diffusion",
+    "curlcurl",
+)
+
+_MFEM_CASE_MESHES = {
+    "diffusion": "mug.e",
+    "curlcurl": "small_fichera.mesh",
+}
+
+
+def mfem_input_path(case_name: str = "diffusion") -> Path:
+    """Get path to a packaged MFEM-backend input file (.i).
+
+    Parameters
+    ----------
+    case_name : str, default='diffusion'
+        Input file name or stem under ``sims/mfem/``.
+
+    Returns
+    -------
+    Path
+        Path to the .i file.
+    """
+    filename = (
+        case_name if case_name.endswith(".i") else f"{case_name}.i"
+    )
+    target = _sim_path("mfem", filename)
+    if not target.is_file():
+        raise DataSetError(f"MFEM input file not found: {target}")
+    return target
+
+
+def mfem_mesh_path(case_name: str = "diffusion") -> Path:
+    """Get path to the mesh file for a packaged MFEM case.
+
+    Parameters
+    ----------
+    case_name : str, default='diffusion'
+        Case stem as in :data:`MFEM_CASES`.
+
+    Returns
+    -------
+    Path
+        Path to the mesh file shipped alongside the input.
+    """
+    try:
+        filename = _MFEM_CASE_MESHES[case_name.removesuffix(".i")]
+    except KeyError:
+        raise DataSetError(
+            f"No packaged mesh known for MFEM case: {case_name}"
+        )
+    target = _sim_path("mfem", filename)
+    if not target.is_file():
+        raise DataSetError(f"MFEM mesh file not found: {target}")
+    return target
+
+
+# ------------------------------------------------------------------------------
 # Gmsh and Simulation Runner Utilities
 # ------------------------------------------------------------------------------
 
