@@ -139,7 +139,7 @@ jobs:
           if-no-files-found: error
 
   build-mpi:
-    name: "MPI: Build and Verify Wheel"
+    name: "MPI/MFEM, Linux: Build and Verify Wheel"
     runs-on: ubuntu-24.04
     timeout-minutes: 360
 
@@ -215,6 +215,14 @@ jobs:
           path: moose/libmesh/installed
           key: linux-mpi-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
+      - name: "MPI: Restore Conduit cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: conduit-cache
+        with:
+          path: moose/framework/contrib/conduit/installed
+          key: linux-mpi-conduit-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
       - name: "MPI: Restore WASP cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
@@ -225,12 +233,24 @@ jobs:
             moose/framework/contrib/hit
           key: linux-mpi-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
+      - name: "MPI: Restore MFEM cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mfem-cache
+        with:
+          path: moose/framework/contrib/mfem/installed
+          key: linux-mpi-mfem-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
       - name: "MPI: Restore MOOSE Config cache"
         if: steps.wheel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         id: mooseconfig-cache
         with:
-          path: moose/framework/include/base/MooseConfig.h
+          # conf_vars.mk travels with the header: it carries the matching
+          # ENABLE_MFEM/MFEM_DIR flags (cf. check_cached_moose_config).
+          path: |
+            moose/framework/include/base/MooseConfig.h
+            moose/conf_vars.mk
           key: linux-mpi-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       - name: "MPI: Build MOOSE dependencies"
