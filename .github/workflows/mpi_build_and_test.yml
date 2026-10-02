@@ -196,7 +196,11 @@ jobs:
         uses: actions/cache/restore@v4
         id: mooseconfig-cache
         with:
-          path: moose/framework/include/base/MooseConfig.h
+          # conf_vars.mk travels with the header: it carries the matching
+          # ENABLE_MFEM/MFEM_DIR flags (cf. check_cached_moose_config).
+          path: |
+            moose/framework/include/base/MooseConfig.h
+            moose/conf_vars.mk
           key: linux-mpi-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       - name: "MPI: Configure MOOSE"
@@ -210,7 +214,9 @@ jobs:
         if: steps.wheel-cache.outputs.cache-hit != 'true' && steps.mooseconfig-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: moose/framework/include/base/MooseConfig.h
+          path: |
+            moose/framework/include/base/MooseConfig.h
+            moose/conf_vars.mk
           key: linux-mpi-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
 
       - name: "MPI: Build Rabbit, stage artifacts, and build wheel"

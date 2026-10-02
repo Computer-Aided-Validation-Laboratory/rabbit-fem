@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-02 — MPI/MFEM: cached MooseConfig.h without conf_vars.mk (PR #10)
+
+- **CI run**: MPI/MFEM run `36992181427`, step `Build Rabbit, stage artifacts, and build wheel`: framework compile dies with `Moose.h:378: fatal error: 'mfem.hpp' file not found`, while every dep cache (PETSc/libMesh/Conduit/WASP/MFEM/MooseConfig) reported `Cache hit`.
+- **Root cause**: cache-restore/build-script interaction, same class as the Sep-25 macOS PNG fix. The MOOSE-config cache stores only `MooseConfig.h` (the MFEM *decision*), never the generated `conf_vars.mk` that carries the matching `ENABLE_MFEM`/`MFEM_DIR` *flags* (moose.mk pulls MFEM via `$(MFEM_DIR)/share/mfem/config.mk`). On the fresh runner the restored header defines `MOOSE_MFEM_ENABLED` but `MFEM_DIR` is empty, so no `-I` reaches the compiler. Proven in the log: all six `-mpi-` keys hit, `Configure MOOSE` skipped, `conf_vars.mk` in no cache path and never mentioned. Sibling-run cache sharing under identical keys (same code) rules out cross-version poisoning.
+- **Fix (structural, MPI-scoped)**: (1) `mpi_build_and_test.yml` caches `moose/conf_vars.mk` with the header (restore+save), so decision and flags travel together; (2) new `check_cached_moose_config()` in `linux.py`, called from `configure_moose`, deletes both files when the header claims MFEM but `conf_vars.mk` is missing or its `MFEM_DIR/include/mfem.hpp` does not exist — self-healing against already-poisoned saves. Serial headers never define the marker, so serial runs pass through byte-identical (variant isolation preserved). Workflow file is not hashed into dep keys, so no extra rebuilds beyond the one fresh configure.
+- **De-poisoning**: deleted the header-only `linux-mpi-mooseconfig-efa943...` cache entry so the next run configures fresh and saves both files (old-recipe orphans remain unreachable).
+- **Files changed**: `scripts/build/linux.py`, `test/test_build_env.py` (4 guard tests), `.github/workflows/mpi_build_and_test.yml`, `dev/log_opencode_fixes.md`.
+- **Verification**: 19/19 `test_build_env` pass; live proof is the next MPI round (configure re-runs once, then `mfem.hpp` resolves and the framework links).
+- **Remaining uncertainty**: none on mechanism.
+
 ## 2026-10-02 — Windows: XDR fallback test used non-portable path compare (PR #10)
 
 - **CI run**: Windows `36982854740`, step `Run test suite`: `1 failed, 90 passed, 4 skipped` — the single failure is `test_linux_xdr_probe_falls_back_to_system_tirpc_include` (my own test from the Linux XDR fix, not product code).

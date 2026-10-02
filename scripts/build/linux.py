@@ -536,6 +536,52 @@ def build_mfem(
     )
 
 
+def check_cached_moose_config(moose_dir: Path) -> None:
+    """Remove a stale cached MOOSE config whose MFEM flags disagree.
+
+    Only MooseConfig.h is cached, never the generated conf_vars.mk that
+    carries ENABLE_MFEM/MFEM_DIR (moose.mk includes MFEM via
+    $(MFEM_DIR)/share/mfem/config.mk). If the cached header enables the
+    MFEM backend but the flags file is missing or its MFEM_DIR holds no
+    mfem.hpp, delete both so configure below re-runs fresh instead of
+    failing deep in the framework build with 'mfem.hpp file not found'.
+    Serial headers never define MOOSE_MFEM_ENABLED, so serial runs pass
+    through untouched.
+    """
+    cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    if not cfg.is_file():
+        return
+    try:
+        text = cfg.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if "MOOSE_MFEM_ENABLED" not in text:
+        return
+    vars_mk = moose_dir / "conf_vars.mk"
+    usable = False
+    if vars_mk.is_file():
+        try:
+            vars_text = vars_mk.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            vars_text = ""
+        for line in vars_text.splitlines():
+            if line.startswith("MFEM_DIR"):
+                _, _, value = line.partition(":=")
+                mfem_dir = value.strip()
+                usable = bool(mfem_dir) and (
+                    Path(mfem_dir) / "include" / "mfem.hpp"
+                ).is_file()
+                break
+    if not usable:
+        print(
+            "Cached MOOSE config enables MFEM without usable flags; "
+            "removing to force a fresh configure..."
+        )
+        cfg.unlink()
+        if vars_mk.is_file():
+            vars_mk.unlink()
+
+
 def configure_moose(
     repo_dir: Path,
     moose_dir: Path,
@@ -544,6 +590,7 @@ def configure_moose(
 ) -> None:
     """Configure MOOSE framework on Linux."""
     ensure_moose_repo(repo_dir, moose_dir)
+    check_cached_moose_config(moose_dir)
     moose_cfg = (
         moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
     )

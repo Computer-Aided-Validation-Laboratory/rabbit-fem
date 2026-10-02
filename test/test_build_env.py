@@ -263,6 +263,74 @@ def test_linux_xdr_candidates_include_system_tirpc_when_present(
     assert linux_mod._xdr_include_candidates() == [[], ["-I/usr/include/tirpc"]]
 
 
+def _write_moose_config(moose_dir: Path, *, mfem_enabled: bool) -> Path:
+    """Materialize a minimal MooseConfig.h with/without the MFEM marker."""
+    cfg = moose_dir / "framework" / "include" / "base" / "MooseConfig.h"
+    cfg.parent.mkdir(parents=True)
+    marker = "#define MOOSE_MFEM_ENABLED 1\n" if mfem_enabled else ""
+    cfg.write_text(f"// fake config\n{marker}", encoding="utf-8")
+    return cfg
+
+
+def test_linux_cached_config_serial_passes_through_without_vars_mk(
+    tmp_path: Path,
+) -> None:
+    """Serial configs never carry the MFEM marker, so no flags are needed."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_moose_config(moose_dir, mfem_enabled=False)
+    linux_mod.check_cached_moose_config(moose_dir)
+    assert cfg.is_file()
+
+
+def test_linux_cached_config_mfem_kept_when_flags_usable(
+    tmp_path: Path,
+) -> None:
+    """A cached MFEM config with a matching conf_vars.mk must survive."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_moose_config(moose_dir, mfem_enabled=True)
+    mfem_inc = moose_dir / "mfem" / "include"
+    mfem_inc.mkdir(parents=True)
+    (mfem_inc / "mfem.hpp").write_text("// fake\n", encoding="utf-8")
+    (moose_dir / "conf_vars.mk").write_text(
+        f"ENABLE_MFEM       := true\nMFEM_DIR          := {moose_dir / 'mfem'}\n",
+        encoding="utf-8",
+    )
+    linux_mod.check_cached_moose_config(moose_dir)
+    assert cfg.is_file()
+
+
+def test_linux_cached_config_mfem_dropped_when_vars_mk_missing(
+    tmp_path: Path,
+) -> None:
+    """MFEM decision without flags must force a fresh configure.
+
+    Regression for the MPI CI failure where a cached MooseConfig.h
+    (MFEM enabled) restored without conf_vars.mk and the framework build
+    died with 'mfem.hpp file not found'.
+    """
+    moose_dir = tmp_path / "moose"
+    cfg = _write_moose_config(moose_dir, mfem_enabled=True)
+    assert not (moose_dir / "conf_vars.mk").exists()
+    linux_mod.check_cached_moose_config(moose_dir)
+    assert not cfg.exists()
+
+
+def test_linux_cached_config_mfem_dropped_when_mfem_dir_broken(
+    tmp_path: Path,
+) -> None:
+    """A conf_vars.mk pointing at headers that do not exist must not pass."""
+    moose_dir = tmp_path / "moose"
+    cfg = _write_moose_config(moose_dir, mfem_enabled=True)
+    vars_mk = moose_dir / "conf_vars.mk"
+    vars_mk.write_text(
+        "ENABLE_MFEM       := true\nMFEM_DIR          := /nonexistent/prefix\n",
+        encoding="utf-8",
+    )
+    linux_mod.check_cached_moose_config(moose_dir)
+    assert not cfg.exists()
+    assert not vars_mk.exists()
+
+
 def _record_stages(
     monkeypatch: pytest.MonkeyPatch, names: list[str]
 ) -> list[str]:
