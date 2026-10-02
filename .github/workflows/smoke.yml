@@ -178,6 +178,15 @@ jobs:
             mkdir -p /tmp/rabbit-smoke-mfem-run && cd /tmp/rabbit-smoke-mfem-run
             env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_input_path, mfem_mesh_path, run_rabbit; r = run_rabbit(mfem_input_path('curlcurl'), extra_args=['Mesh/file=' + str(mfem_mesh_path('curlcurl'))]); assert r.returncode == 0; print('MFEM smoke solve OK')"
             ls -la /tmp/rabbit-smoke-mfem-run/OutputData/CurlCurl/*.csv
+            # Same MFEM case multi-rank: `mpirun -n 4 rabbit <deck>.i`
+            # proves the backend actually runs in parallel (the singleton
+            # above only proves the packaged layout resolves).
+            MFEM_MPI_INPUT=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_input_path; print(mfem_input_path('curlcurl'))")
+            MFEM_MPI_MESH=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_mesh_path; print(mfem_mesh_path('curlcurl'))")
+            mkdir -p /tmp/rabbit-smoke-mfem-mpi-run && cd /tmp/rabbit-smoke-mfem-mpi-run
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH mpirun -n 4 "$SMOKE_BIN" -i "$MFEM_MPI_INPUT" Mesh/file="$MFEM_MPI_MESH"
+            ls -la /tmp/rabbit-smoke-mfem-mpi-run/OutputData/CurlCurl/*.csv
+            echo "MFEM MPI smoke solve OK"
           else
             # Serial wheel: prove SMP threading parallelises. This step
             # runs on Linux/macOS only (the whole step is skipped on
