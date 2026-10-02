@@ -208,6 +208,41 @@ def test_linux_xdr_probe_names_package_when_headers_missing(
         linux_mod.check_xdr_headers(zigcc)
 
 
+def test_linux_xdr_probe_falls_back_to_system_tirpc_include(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The XDR preflight accepts Debian/Ubuntu libtirpc-dev layout.
+
+    Regression for the Linux CI failure where the bare
+    ``#include <rpc/rpc.h>`` probe failed despite ``libtirpc-dev`` being
+    installed: on Debian/Ubuntu the headers live under
+    ``/usr/include/tirpc`` (libMesh's own configure tries
+    ``-I/usr/include/tirpc``), so the preflight must try it too instead
+    of rejecting a healthy machine.
+    """
+    import subprocess
+
+    zigcc, _ = _fake_wrappers(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        cmd = list(args[0])
+        calls.append(cmd)
+        if "-I/usr/include/tirpc" in cmd:
+            return subprocess.CompletedProcess(args[0], 0, "", "")
+        return subprocess.CompletedProcess(args[0], 1, "", "fatal error")
+
+    monkeypatch.setattr(linux_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        linux_mod.Path, "is_dir", lambda self: str(self) == "/usr/include/tirpc"
+    )
+    for key in ("TIRPC_DIR", "CONDA_PREFIX"):
+        monkeypatch.delenv(key, raising=False)
+    linux_mod.check_xdr_headers(zigcc)
+    assert len(calls) == 2
+    assert "-I/usr/include/tirpc" in calls[1]
+
+
 def _record_stages(
     monkeypatch: pytest.MonkeyPatch, names: list[str]
 ) -> list[str]:

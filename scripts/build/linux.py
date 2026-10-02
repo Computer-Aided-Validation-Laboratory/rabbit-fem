@@ -78,6 +78,38 @@ def check_build_tools(*, mpi: bool = False) -> None:
         )
 
 
+def _xdr_include_candidates() -> list[list[str]]:
+    """Candidate -I flag sets for the XDR header probe.
+
+    Mirrors libMesh's own ``CONFIGURE_XDR`` fallback order: a bare
+    compile first (glibc sunrpc, conda prefix already on ``CPATH``, or
+    caller-provided ``CPPFLAGS``), then the documented system tirpc
+    location (``libtirpc-dev`` on Debian/Ubuntu, same ``-I`` libMesh
+    tries). Env-derived prefixes (``TIRPC_DIR``, ``CONDA_PREFIX``) are
+    preferred over the system path, matching MOOSE's
+    ``configure_libmesh.sh`` handling. Entries whose directories do not
+    exist are skipped so no bogus ``-I`` is passed.
+    """
+    candidates: list[list[str]] = [[]]
+    seen: set[str] = set()
+    extra_dirs: list[str] = []
+    tirpc_dir = os.environ.get("TIRPC_DIR", "")
+    if tirpc_dir:
+        extra_dirs.append(tirpc_dir)
+    conda_prefix = os.environ.get("CONDA_PREFIX", "")
+    if conda_prefix:
+        extra_dirs.append(str(Path(conda_prefix) / "include" / "tirpc"))
+    # Documented system location (what libMesh itself falls back to).
+    extra_dirs.append("/usr/include/tirpc")
+    for inc_dir in extra_dirs:
+        if not inc_dir or inc_dir in seen:
+            continue
+        seen.add(inc_dir)
+        if Path(inc_dir).is_dir():
+            candidates.append([f"-I{inc_dir}"])
+    return candidates
+
+
 def check_xdr_headers(zigcc_path: Path) -> None:
     """Fail early if no XDR (rpc) headers are visible to the toolchain.
 
@@ -87,27 +119,41 @@ def check_xdr_headers(zigcc_path: Path) -> None:
     actual wrapper compiler instead of checking fixed paths: headers may
     legitimately come from the system (``libtirpc-dev``), a conda prefix,
     or ``CPATH``. Anything the probe cannot compile, libMesh cannot use.
+
+    The probe mirrors libMesh's fallback: a bare ``#include <rpc/rpc.h>``
+    first, then the same ``-I/usr/include/tirpc`` libMesh tries (plus any
+    ``TIRPC_DIR``/conda prefix from the environment).
     """
     import tempfile
 
+    candidates = _xdr_include_candidates()
     with tempfile.TemporaryDirectory(prefix="rabbit-xdr-probe-") as tmp:
         src = Path(tmp) / "xdr_probe.c"
         src.write_text(
             '#include <rpc/rpc.h>\nint main(void) { return 0; }\n',
             encoding="utf-8",
         )
-        res = subprocess.run(
-            [str(zigcc_path), "-c", str(src), "-o", str(Path(tmp) / "x.o")],
-            capture_output=True,
-            text=True,
-        )
-    if res.returncode != 0:
-        raise RuntimeError(
-            "XDR (rpc) headers not found by the build compiler. "
-            "libMesh requires them (MOOSE passes --enable-xdr-required). "
-            "Install the system package (e.g. "
-            "`sudo apt-get install -y libtirpc-dev` on Ubuntu) and retry."
-        )
+        for extra_flags in candidates:
+            res = subprocess.run(
+                [
+                    str(zigcc_path),
+                    "-c",
+                    str(src),
+                    "-o",
+                    str(Path(tmp) / "x.o"),
+                    *extra_flags,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode == 0:
+                return
+    raise RuntimeError(
+        "XDR (rpc) headers not found by the build compiler. "
+        "libMesh requires them (MOOSE passes --enable-xdr-required). "
+        "Install the system package (e.g. "
+        "`sudo apt-get install -y libtirpc-dev` on Ubuntu) and retry."
+    )
 
 
 def setup_linux_toolchain(repo_dir: Path) -> tuple[Path, Path]:

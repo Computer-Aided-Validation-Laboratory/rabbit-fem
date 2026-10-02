@@ -1,5 +1,15 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-02 — Linux XDR preflight rejected healthy libtirpc-dev layout (PR #10)
+
+- **CI run**: PR #10 Linux `36981263647`, step `Build libMesh` failed in ~1s: `RuntimeError: XDR (rpc) headers not found by the build compiler ... Install libtirpc-dev`, despite the workflow installing `libtirpc-dev`.
+- **Root cause**: preflight bug, not a missing package. On Debian/Ubuntu `libtirpc-dev` ships headers under `/usr/include/tirpc` (there is no `/usr/include/rpc/rpc.h`), so a bare `#include <rpc/rpc.h>` compile always fails. libMesh's own `CONFIGURE_XDR` knows this and retries with `-I/usr/include/tirpc -ltirpc`; our `check_xdr_headers` only tried the bare compile, so it false-positived on a machine that would have built fine.
+- **Fix**: probe mirrors libMesh's fallback order via new `_xdr_include_candidates()`: bare compile first, then env-derived prefixes (`TIRPC_DIR`, `CONDA_PREFIX/include/tirpc`, matching MOOSE's `configure_libmesh.sh`) and the documented `/usr/include/tirpc` system path (same `-I` libMesh tries). Non-existent dirs are skipped, so no bogus `-I` is passed. Compile-only (`-c`) is unchanged — the link half (`-ltirpc`) stays libMesh configure's job.
+- **Platform considerations**: `scripts/build/linux.py` only; darwin/windows untouched. `/usr/include/tirpc` is a distro-documented location (also hard-coded in libMesh), not a runner-specific path; env prefixes keep conda/custom installs working via standard variables.
+- **Files changed**: `scripts/build/linux.py`, `test/test_build_env.py` (new tirpc-fallback regression test), `dev/log_opencode_fixes.md`.
+- **Verification**: 14/14 `test_build_env.py` pass (incl. new fallback + existing pass/fail probe tests); 42 passed across `test_build_env/test_moose_pins/test_variant`. Live proof is the next Linux round (preflight passes, libMesh configure runs).
+- **Remaining uncertainty**: none on mechanism. If a future image lacks both the headers and the fallback dir, the probe still fails loudly naming `libtirpc-dev`.
+
 ## 2026-09-30 — Mamba smoke legs: built wheel via conda-managed env (py 3.13, all OSes)
 
 - **Context**: CI was uv-only while colleague Mac failures were conda-based; no leg covered the conda install path (activation env vars, site-packages layout). Narrow by design, not a second matrix.
