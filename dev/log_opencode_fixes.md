@@ -1,5 +1,35 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — Windows MPI: MS-MPI landed in the wrong MSYS2 tree (PR #11)
+
+- **CI run**: Windows MPI `37280476119`, step `Build PETSc` failed in
+  ~3 min in my own preflight: `requires system MS-MPI ...
+  C:\msys64\mingw64\include\mpi.h`. MSYS2 setup + MS-MPI install steps
+  were all green.
+- **Root cause**: two MSYS2 trees on the runner. The setup action
+  installed `mingw-w64-x86_64-msmpi` into its temp tree
+  (`D:\a\_temp\setup-msys2\msys64` — proven: `installing
+  mingw-w64-x86_64-msmpi...` in its log), but the ps1 builds with the
+  detected `$MsysRoot` (image install `C:\msys64`), which never got the
+  package. A workflow package list can only feed the action's tree, so
+  it can never satisfy a build rooted elsewhere.
+- **Fix**: single owner — the ps1 installs `mingw-w64-x86_64-msmpi`
+  itself into `$MsysRoot` when the header/lib are absent (same ensure
+  pattern as the existing tool installs, exit code checked loudly),
+  keeping the fail-early throw when still absent. Removed the package
+  from the workflow install list (dead weight feeding the wrong tree).
+  Serial paths untouched (block is `$IsMpi`-gated; pre-existing silent
+  pacman behaviour left as-is).
+- **Files changed**:
+  `scripts/install_dependencies_windows.ps1`,
+  `.github/workflows/windows_mpi_build_and_test.yml`,
+  `dev/log_opencode_fixes.md`.
+- **Verification**: workflow YAML parses; 81 unit tests pass (+3
+  skips; sim/gold need a built binary). Live proof is the next Windows
+  MPI round (ps1 installs msmpi into `C:\msys64`, PETSc configure runs).
+- **Remaining uncertainty**: pacman weight on the image tree; PETSc
+  acceptance of the flags — the next round decides.
+
 ## 2026-10-05 — Windows MPI first go (branch windows-mpi, PR #11)
 
 - **Scope**: initial Windows MPI variant assuming system MPI (MS-MPI), no

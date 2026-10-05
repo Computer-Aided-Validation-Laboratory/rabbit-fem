@@ -33,6 +33,11 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      # NOTE: no mingw-w64-x86_64-msmpi here on purpose. A runner can
+      # carry two MSYS2 trees (image install plus this action's temp
+      # install) and this list feeds only the latter, while the ps1
+      # builds with the detected $MsysRoot — so the ps1 installs the
+      # package itself into the tree it actually uses (single owner).
       - name: "Windows MPI: Set up MSYS2"
         uses: msys2/setup-msys2@v2
         with:
@@ -48,7 +53,6 @@ jobs:
             m4
             git
             cmake
-            mingw-w64-x86_64-msmpi
 
       - name: "Windows MPI: Install system MS-MPI"
         uses: mpi4py/setup-mpi@v1

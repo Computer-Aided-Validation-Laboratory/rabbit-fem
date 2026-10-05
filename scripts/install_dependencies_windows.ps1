@@ -85,8 +85,18 @@ Write-Host "[OK] MSYS2 required tools verified (diff, make, patch, m4, git, pyth
 $IsMpi = ($env:RABBIT_MPI -eq "1")
 if ($IsMpi) {
     Write-Host "[*] MPI variant selected (RABBIT_MPI=1): using system MS-MPI." -ForegroundColor Cyan
+    # Headers + MinGW import lib live in the MSYS2 tree this script builds
+    # with ($MsysRoot) — not necessarily the tree a CI setup step
+    # provisioned (a runner can carry an image MSYS2 plus a
+    # setup-msys2 temp install side by side). Install here so the files
+    # are guaranteed beside the toolchain that consumes them.
     $MsMpiHeader = Join-Path $MsysRoot "mingw64\include\mpi.h"
     $MsMpiLib = Join-Path $MsysRoot "mingw64\lib\libmsmpi.a"
+    if (-not (Test-Path $MsMpiHeader) -or -not (Test-Path $MsMpiLib)) {
+        Write-Host "[*] Installing system MS-MPI for MinGW (mingw-w64-x86_64-msmpi) into $MsysRoot..." -ForegroundColor Yellow
+        & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm mingw-w64-x86_64-msmpi
+        if ($LASTEXITCODE -ne 0) { throw "Failed to install mingw-w64-x86_64-msmpi into $MsysRoot (pacman exit $LASTEXITCODE)." }
+    }
     if (-not (Test-Path $MsMpiHeader) -or -not (Test-Path $MsMpiLib)) {
         throw "Windows MPI build requires system MS-MPI for MinGW (MSYS2 package mingw-w64-x86_64-msmpi provides $MsMpiHeader and $MsMpiLib). Install it and retry."
     }
