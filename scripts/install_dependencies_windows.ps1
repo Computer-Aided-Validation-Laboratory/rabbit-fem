@@ -60,7 +60,21 @@ foreach ($tool in $requiredMsysTools) {
 }
 if ($needsInstall) {
     Write-Host "[*] Synchronizing MSYS2 database and installing required packages..." -ForegroundColor Yellow
-    & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/python-pip msys/cmake
+    # Mirror rate-limiting (HTTP 429) is genuinely externally flaky: retry
+    # with backoff (same pattern as the submodule clone retries below)
+    # instead of limping on with missing tools.
+    $pacmanAttempts = 0
+    $pacmanMaxAttempts = 5
+    while ($true) {
+        $pacmanAttempts++
+        & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/python-pip msys/cmake
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($pacmanAttempts -ge $pacmanMaxAttempts) {
+            throw "MSYS2 package installation failed after $pacmanMaxAttempts attempts (pacman exit $LASTEXITCODE); failing early instead of building with missing tools."
+        }
+        Write-Host "[!] MSYS2 package install failed (transient mirror/rate-limit error). Waiting 30s before retry ($pacmanAttempts/$pacmanMaxAttempts)..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 30
+    }
 }
 # MSYS python modules required by MOOSE/PETSc configure scripts (premake.py,
 # versioner.py, PETSc configure). These must be ensured on every run: a cached
@@ -89,9 +103,10 @@ if ($IsMpi) {
     # with ($MsysRoot) — not necessarily the tree a CI setup step
     # provisioned (a runner can carry an image MSYS2 plus a
     # setup-msys2 temp install side by side). Install here so the files
-    # are guaranteed beside the toolchain that consumes them.
+    # are guaranteed beside the toolchain that consumes them. The import
+    # lib is libmsmpi.dll.a (per the package file list), not libmsmpi.a.
     $MsMpiHeader = Join-Path $MsysRoot "mingw64\include\mpi.h"
-    $MsMpiLib = Join-Path $MsysRoot "mingw64\lib\libmsmpi.a"
+    $MsMpiLib = Join-Path $MsysRoot "mingw64\lib\libmsmpi.dll.a"
     if (-not (Test-Path $MsMpiHeader) -or -not (Test-Path $MsMpiLib)) {
         Write-Host "[*] Installing system MS-MPI for MinGW (mingw-w64-x86_64-msmpi) into $MsysRoot..." -ForegroundColor Yellow
         & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm mingw-w64-x86_64-msmpi
@@ -374,7 +389,7 @@ if ($Stage -in @("all", "petsc")) {
         # ILU fallback.
         if ($IsMpi) {
             $MpiIncPosix = "$MsysRootPosix/mingw64/include"
-            $MpiLibPosix = "$MsysRootPosix/mingw64/lib/libmsmpi.a"
+            $MpiLibPosix = "$MsysRootPosix/mingw64/lib/libmsmpi.dll.a"
             $petscMpiFlags = "--with-mpi=1 --with-mpi-compilers=0 --with-mpi-include=$MpiIncPosix --with-mpi-lib=$MpiLibPosix --download-hypre=1"
         } else {
             $petscMpiFlags = "--with-mpi=0"

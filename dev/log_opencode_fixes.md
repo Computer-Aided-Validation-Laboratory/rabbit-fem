@@ -1,5 +1,39 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — Windows serial: MSYS2 mirror 429s + Windows MPI: libmsmpi.dll.a (PR #11)
+
+- **CI runs**: serial `37287530177` failed in `Build WASP and HIT`
+  setup (`C:\msys64\usr\bin\python3.exe` not recognized); MPI
+  `37287529425` failed in `Build PETSc` at the MS-MPI preflight despite
+  a successful pacman install.
+- **Root cause (serial, external flake)**: MSYS2 mirrors returned HTTP
+  429 (rate-limit) mid-transaction (`failed retrieving file ...
+  error: 429`, `failed to commit transaction`), so python3 never
+  installed. Nothing wrong with our code or caches — the MPI run's
+  identical transaction minutes later succeeded. Genuinely externally
+  flaky (the one case retries are for), same justification as the
+  existing submodule-clone retries.
+- **Fix (serial)**: bounded retry (5x30s) around the MSYS2 tool-ensure
+  pacman call; the existing missing-tool verification stays the
+  fail-loud gate. Retry triggers only on non-zero pacman exit, so green
+  runs are byte-identical.
+- **Root cause (MPI, our filename bug)**: the package file list
+  (packages.msys2.org) shows the import lib is
+  `/mingw64/lib/libmsmpi.dll.a`, not `libmsmpi.a` — headers were right,
+  the lib name was assumed. (Bonus from the same listing: the package
+  ships real `mpicc/mpicxx/mpif90.exe` wrappers; deliberately not
+  switching to them — the zig toolchain stays single-owner for all
+  compiles.)
+- **Fix (MPI)**: corrected lib filename in the preflight and the PETSc
+  `--with-mpi-lib` flag (`-lmsmpi` was already correct and unchanged).
+- **Files changed**:
+  `scripts/install_dependencies_windows.ps1`,
+  `dev/log_opencode_fixes.md`.
+- **Verification**: 83 unit tests pass. Live proof is the next round of
+  both Windows legs.
+- **Remaining uncertainty**: mirror 429 recurrence rate (retry covers
+  it); PETSc acceptance of the corrected lib path.
+
 ## 2026-10-05 — rabbit-fem-mpich variant + 3.9 floor legs removed (PR #11)
 
 - **Scope**: `rabbit-fem-mpich` mirrors the OpenMPI/MFEM stack
