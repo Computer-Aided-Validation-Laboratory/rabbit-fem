@@ -9,7 +9,13 @@ import tempfile
 from typing import List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from wrapper_utils import find_zig_binary, posix_to_win, process_wl_arg
+from wrapper_utils import (
+    ensure_default_object_output,
+    find_zig_binary,
+    mpi_include_args,
+    posix_to_win,
+    process_wl_arg,
+)
 
 
 def transform_args(args: List[str]) -> List[str]:
@@ -58,6 +64,9 @@ def transform_args(args: List[str]) -> List[str]:
 
     if not has_target:
         result = ["-target", "x86_64-windows-gnu"] + result
+
+    result = ensure_default_object_output(result)
+    result.extend(mpi_include_args())
 
     for flag in (
         "-fno-sanitize=all",

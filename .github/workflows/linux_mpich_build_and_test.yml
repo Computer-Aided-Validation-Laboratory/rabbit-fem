@@ -239,6 +239,16 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+      - name: "MPICH: Upload build failure logs"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpich-build-failure-logs
+          path: |
+            moose/framework/contrib/mfem/build-opt/CMakeFiles/CMakeError.log
+            moose/framework/contrib/mfem/build-opt/CMakeFiles/CMakeOutput.log
+          if-no-files-found: ignore
+
   mpich-smoke:
     name: "MPICH: Clean-machine smoke test"
     needs: mpich-build-and-test

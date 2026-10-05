@@ -134,3 +134,90 @@ def find_zig_binary() -> List[str]:
 
     # Fallback to python module execution
     return [sys.executable, "-m", "ziglang"]
+
+
+# Suffixes treated as compilable sources when deriving a default object
+# name. Headers and other inputs never produce an object file.
+_SOURCE_SUFFIXES = (
+    ".c",
+    ".i",
+    ".s",
+    ".S",
+    ".cpp",
+    ".cxx",
+    ".cc",
+    ".C",
+    ".cp",
+    ".CPP",
+    ".c++",
+    ".C++",
+)
+
+# Modes that never emit an object file, so no default -o applies.
+_NO_OBJECT_MODES = ("-E", "-S", "-M", "-MM")
+
+
+def has_explicit_output(args: List[str]) -> bool:
+    """Whether the command already names its output with -o."""
+    for arg in args:
+        if arg == "-o":
+            return True
+        if (
+            arg.startswith("-o")
+            and len(arg) > 2
+            and not arg.startswith(("-opt", "-O"))
+        ):
+            return True
+    return False
+
+
+def ensure_default_object_output(args: List[str]) -> List[str]:
+    """Append ``-o <stem>.o`` for a bare ``-c`` compile without ``-o``.
+
+    ``zig cc -target x86_64-windows-gnu -c foo.c`` writes ``foo.obj``
+    by default (verified with zig 0.16.0), while POSIX Makefiles that
+    omit ``-o`` expect ``foo.o`` (e.g. Hypre lists ``*.o`` in OBJS and
+    archives them, so ``ar`` fails on the missing files even though
+    every compile exits 0). GCC/Clang on POSIX write ``<stem>.o`` for
+    ``-c`` without ``-o``; restoring that convention here keeps such
+    Makefiles working. Only applies to exactly one source operand
+    (``-c`` with several sources is left alone) and never to
+    preprocess/assemble-only modes. Output goes to the current
+    directory, matching ``cc -c dir/foo.c`` writing ``./foo.o``.
+    """
+    if "-c" not in args:
+        return args
+    if has_explicit_output(args):
+        return args
+    if any(mode in args for mode in _NO_OBJECT_MODES):
+        return args
+    sources: List[str] = []
+    for arg in args:
+        if not arg or arg.startswith(("-", "@")):
+            continue
+        name = arg.replace("\\", "/").rsplit("/", 1)[-1]
+        dot = name.rfind(".")
+        if dot > 0 and name[dot:] in _SOURCE_SUFFIXES:
+            sources.append(arg)
+    if len(sources) != 1:
+        return args
+    name = sources[0].replace("\\", "/").rsplit("/", 1)[-1]
+    stem = name[: name.rfind(".")]
+    return args + ["-o", stem + ".o"]
+
+
+def mpi_include_args() -> List[str]:
+    """Extra ``-I`` dir from ``RABBIT_MPI_INCLUDE``, if set.
+
+    The Windows MPI build points PETSc at system MS-MPI via
+    ``--with-mpi-include``, but external download configures (e.g.
+    Hypre) probe for ``mpi.h`` with plain ``CFLAGS``, so the header is
+    invisible and the package silently builds its serial stubs.
+    ``install_dependencies_windows.ps1`` sets this variable (MSYS
+    form, converted here) for MPI builds only; serial builds never see
+    it and behave exactly as before.
+    """
+    inc = os.environ.get("RABBIT_MPI_INCLUDE")
+    if not inc:
+        return []
+    return ["-I" + posix_to_win(inc)]

@@ -1,5 +1,115 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — Windows MPI Hypre: zig `.obj` default + invisible `mpi.h` (PR #11)
+
+- **CI runs**: Windows MPI `37294305947`, `37309458638`, `37312695933`
+  — identical `Build PETSc` failure in Hypre `make`:
+  `ar: error: F90_HYPRE_error.o: No such file or directory` with zero
+  compiler diagnostics. `37312695933` carried the new Hypre
+  `src/config.log` (uploaded since `27f0041`), which broke the case
+  open.
+- **First failure addressed here**: Windows MPI `Build PETSc`.
+
+### Root cause (proven, not assumed)
+
+1. `zig cc -target x86_64-windows-gnu -c foo.c` (zig 0.16.0) writes
+  `foo.obj` by default — reproduced locally (absolute- and
+  relative-path compiles both emit `foo.obj`, never `foo.o`).
+  Hypre's `src/utilities` rules compile without `-o` but list
+  `*.o` in `OBJS`/the `ar` line (only the newer device files carry
+  explicit `-o *.obj`, which is why they were fine). `make` trusts
+  the exit code 0, proceeds to `ar`, which fails on the missing
+  `.o` files. Consistent with every observation: silent compiles,
+  mixed `.o`/`.obj` archive line, and autoconf itself reporting
+  `checking for suffix of object files... obj`. Serial PETSc is
+  unaffected (no Hypre download); Linux is unaffected (zig there
+  emits `.o`).
+2. Hypre's `configure` probes (`mpi.h`, `MPI_Comm_f2c`) run with plain
+  `CFLAGS` — the conftest line in `src/config.log` has no
+  `-I/c/msys64/mingw64/include` — so PETSc's `--with-mpi-include`
+  never reaches them (`fatal error: 'mpi.h' file not found`) and the
+  download silently builds serial `mpistubs`, which would cripple the
+  parallel `hypre boomeramg` path the MPI suite exists to exercise.
+
+### Why the fix addresses the root cause
+
+- `ensure_default_object_output()` in
+  `scripts/windows_wrappers/wrapper_utils.py`, called from both
+  `cc_wrapper.transform_args` and `cxx_wrapper.transform_args`:
+  bare `-c` with exactly one source and no `-o` gains
+  `-o <stem>.o` (cwd, matching `cc -c dir/foo.c` writing `./foo.o`).
+  Restores the POSIX convention such Makefiles assume; explicit
+  `-o`, link lines, `-E/-S/-M` modes, and multi-source `-c` are
+  untouched. Verified end to end through the real wrapper + zig:
+  bare `-c foo.c` now emits `foo.o`.
+- `mpi_include_args()` (same file): appends `-I` from
+  `RABBIT_MPI_INCLUDE` (MSYS form, converted to a Windows path in
+  the wrapper, so no env-splitting hazard). `ps1` sets it to the
+  MS-MPI include dir for MPI PETSc configures only; serial builds
+  never set it and behave byte-identically. `CPATH` was considered
+  and rejected (Windows `;` vs POSIX `:` splitting of `C:/...`
+  values); `CPPFLAGS`-via-passthrough was rejected (unverifiable
+  quoting through ps1->bash->PETSc->Hypre layers).
+- `test/test_windows_wrappers.py`: 13 tests (default `-o`, explicit
+  `-o` forms, link/preprocess/multi-source/header passthrough,
+  basename derivation, both wrappers end to end, env set/unset).
+
+### MPICH MFEM `FindPETSc` failure: still under diagnosis
+
+- MPICH `37309459303` (with the `libmpich` staging fix) and
+  `37312696317` both fail at step 21 `Build MFEM`, **not** staging —
+  the staging fix is verified effective (build reaches MFEM).
+  `FindPETSc.cmake` multipass `petsc_works_*` try_run fails
+  (`missing: PETSC_EXECUTABLE_RUNS`). Compile-vs-run is not yet
+  distinguishable from the job log; `CMakeError.log` was never
+  uploaded. No code change made (no speculation).
+- Diagnostic-only change here: `linux_mpich_build_and_test.yml`
+  gains an `MPICH: Upload build failure logs` step
+  (`build-opt/CMakeFiles/CMakeError.log` + `CMakeOutput.log`,
+  `if-no-files-found: ignore`), mirroring the windows-mpi pattern.
+- Open question for the next watch tick: MPI/MFEM build
+  `111771741952` (same push) is still running. If it fails
+  identically at MFEM, the cause is shared (fresh full-rebuild
+  PETSc after the `common.py` cache-key change) rather than
+  MPICH-specific — investigate the PETSc build next, not MPICH.
+
+### Platform-specific considerations
+
+- Wrappers run only on Windows (`install_dependencies_windows.ps1`
+  toolchain); Linux/macOS compilers untouched. Serial Windows
+  unaffected (env unset; `-o` derivation only changes commands that
+  previously produced wrongly-named outputs).
+- No hardcoded paths/users/drives: include dir derived from
+  `$MsysRoot` at runtime; `.o` name derived from the source operand.
+- MPICH workflow change is artifact-upload only.
+
+### Files changed
+
+- `scripts/windows_wrappers/wrapper_utils.py` (two helpers).
+- `scripts/windows_wrappers/cc_wrapper.py`,
+  `scripts/windows_wrappers/cxx_wrapper.py` (call sites).
+- `scripts/install_dependencies_windows.ps1`
+  (`$env:RABBIT_MPI_INCLUDE` for MPI PETSc stage).
+- `test/test_windows_wrappers.py` (new, 13 tests).
+- `.github/workflows/linux_mpich_build_and_test.yml` (failure logs).
+
+### How to verify
+
+- Local: `pytest test/test_windows_wrappers.py
+  test/test_staging.py test/test_build_env.py` → 44 passed; wrapper
+  e2e via real zig emits `foo.o`.
+- CI: next Windows MPI round should pass Hypre `make` (watch for
+  `libHYPRE_utilities.a` building, then `mpi.h... yes` in a future
+  `config.log`); next MPICH round uploads `CMakeError.log`.
+
+### Remaining uncertainty
+
+- Whether Hypre's `MPI_Comm_f2c` link probe (needs `-L/-l`, still
+  absent from conftests) matters with `--disable-fortran` — likely
+  benign, flagged for the next log read.
+- MPICH MFEM compile-vs-run (pending `CMakeError.log` + the
+  MPI/MFEM-leg verdict).
+
 ## 2026-10-05 — MPICH staging (libmpich external) + MPI smoke --oversubscribe + windows-mpi setup-msys2 input (PR #11)
 
 - **CI runs** (all PR #11, push `a76b3c0`, ~10:05 UTC): Windows MPI

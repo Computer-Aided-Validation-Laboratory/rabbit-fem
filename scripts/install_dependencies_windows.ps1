@@ -395,6 +395,13 @@ if ($Stage -in @("all", "petsc")) {
             # 'invalid value of canonical host'), so name it explicitly.
             # Same mingw64 target the whole toolchain builds for.
             $petscMpiFlags = "--with-mpi=1 --with-mpi-compilers=0 --with-mpi-include=$MpiIncPosix --with-mpi-lib=$MpiLibPosix --download-hypre=1 --download-hypre-configure-arguments=--host=x86_64-w64-mingw32"
+            # Hypre's configure probes (mpi.h, MPI symbols) run with
+            # plain CFLAGS, so --with-mpi-include alone never reaches
+            # them and the download silently builds serial mpistubs.
+            # The zig wrappers append this dir as -I (see
+            # RABBIT_MPI_INCLUDE in scripts/windows_wrappers); set for
+            # MPI builds only, inherited by the configure below.
+            $env:RABBIT_MPI_INCLUDE = $MpiIncPosix
         } else {
             $petscMpiFlags = "--with-mpi=0"
         }
