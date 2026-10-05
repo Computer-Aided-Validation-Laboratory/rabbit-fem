@@ -417,3 +417,54 @@ def test_linux_serial_skips_conduit_and_mfem(
         "build_wasp",
         "configure_moose",
     ]
+
+
+def _record_petsc_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
+    """Run build_petsc with everything stubbed; return the script argv."""
+    monkeypatch.setattr(linux_mod, "ensure_moose_repo", lambda *a: None)
+    monkeypatch.setattr(linux_mod, "ensure_moose_submodules", lambda *a: None)
+    monkeypatch.setattr(linux_mod, "check_build_tools", lambda **k: None)
+    recorded: list[str] = []
+
+    def fake_run(
+        cmd: list[str], **kwargs: object
+    ) -> object:
+        recorded.extend(cmd)
+        return None
+
+    monkeypatch.setattr(linux_mod.subprocess, "run", fake_run)
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    linux_mod.build_petsc(tmp_path, tmp_path, zigcc, zigcxx)
+    return recorded
+
+
+def test_linux_mpi_pins_mpi_compilers_for_petsc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PETSc must be told its MPI compilers as configure arguments.
+
+    Regression protection: PETSc's configure ignores CC/CXX env (it
+    warns and auto-detects bare ``mpicc``), so on multi-MPI machines
+    the MPI variant silently configured the wrong MPI (libMesh then
+    died with "configured with Open MPI ... non-Open MPI mpi.h").
+    """
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.delenv("RABBIT_MPI_IMPL", raising=False)
+    cmd = _record_petsc_command(tmp_path, monkeypatch)
+    assert "--with-cc=mpicc" in cmd
+    assert "--with-cxx=mpicxx" in cmd
+    assert "--with-fc=mpif90" in cmd
+
+
+def test_linux_mpich_pins_suffixed_compilers_for_petsc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The MPICH variant pins the explicit .mpich wrappers."""
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "mpich")
+    cmd = _record_petsc_command(tmp_path, monkeypatch)
+    assert "--with-cc=mpicc.mpich" in cmd
+    assert "--with-cxx=mpicxx.mpich" in cmd
+    assert "--with-fc=mpif90.mpich" in cmd

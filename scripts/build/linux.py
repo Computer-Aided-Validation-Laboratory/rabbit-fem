@@ -326,6 +326,16 @@ def build_petsc(
         petsc_env.pop("PETSC_DIR", None)
         petsc_env.pop("PETSC_ARCH", None)
         if is_mpi_build():
+            # PETSc's configure ignores CC/CXX/FX env (it warns and
+            # auto-detects bare `mpicc` instead), so on multi-MPI
+            # machines it silently configures the wrong MPI. Pin the
+            # wrappers as configure args instead, which
+            # update_and_rebuild_petsc.sh forwards to ./configure.
+            mpi_compiler_args = [
+                f"--with-cc={petsc_env['CC']}",
+                f"--with-cxx={petsc_env['CXX']}",
+                f"--with-fc={mpi_fortran_wrapper()}",
+            ]
             subprocess.run(
                 [
                     "./scripts/update_and_rebuild_petsc.sh",
@@ -333,6 +343,7 @@ def build_petsc(
                     "--CXXOPTFLAGS=-O3",
                     "--COPTFLAGS=-O3",
                     "--FOPTFLAGS=-O3",
+                    *mpi_compiler_args,
                 ],
                 cwd=str(moose_dir),
                 env=petsc_env,
