@@ -1,5 +1,62 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 (local) — Linux MPI: pin PETSc compilers, configure ignores CC env
+
+- **Local run**: MPICH wheel build on Ubuntu noble with both OpenMPI
+  (default `mpicc`) and MPICH installed. `build_petsc` completed but
+  libMesh died with `petscsys.h: "PETSc was configured with Open MPI
+  but now appears to be compiling using a non-Open MPI mpi.h"`.
+- **First failure addressed here**: local `Build libMesh`.
+
+### Root cause (proven from logs)
+
+  PETSc's `./configure` **ignores `CC`/`CXX` env** (`Found
+  environment variable: CC=mpicc.mpich. Ignoring it!`) and
+  auto-detects bare `mpicc`, which resolves via update-alternatives
+  to whatever MPI is default (OpenMPI here). `get_linux_tool_env`
+  only sets env, so on multi-MPI machines the MPI variant silently
+  builds the wrong-MPI PETSc; downstream MPICH compiles then fail
+  the vendor check. CI never caught it: each runner has exactly one
+  MPI, so auto-detect accidentally agrees there.
+
+### Why the fix addresses the root cause
+
+- `build_petsc` (MPI branch) now passes
+  `--with-cc=<CC> --with-cxx=<CXX> --with-fc=<fortran wrapper>`
+  (values from the existing `mpi_compiler_env`/`mpi_fortran_wrapper`
+  mapping: `mpicc`/`mpicxx`/`mpif90` vs `.mpich` suffixed), which
+  `update_and_rebuild_petsc.sh` forwards to `./configure` as
+  documented configure arguments. Deterministic on any machine;
+  single-MPI CI behavior unchanged (same effective compilers).
+- Regression tests pin both impl spellings in the recorded script
+  argv (`test_build_env.py`).
+- Local note: switching impls in one tree needs manual cleaning
+  (`arch-moose`, `libmesh/installed`, MOOSE config, `make clobber`
+  for framework/modules/app) — readiness checks cannot tell
+  OpenMPI outputs from MPICH ones. CI is immune (per-impl caches).
+
+### Files changed
+
+- `scripts/build/linux.py`, `test/test_build_env.py`.
+
+### Verification
+
+- Local: 23 `test_build_env.py` pass; full local MPICH rebuild in
+  progress (this run), then wheel + `mpiexec.mpich -n 4` MFEM
+  `curlcurl.i` smoke.
+- CI: `0d3e6e1` exercises the new args on both MPI legs.
+- Follow-up fix in `93f2fab`: same run then died in PETSc configure
+  with `Your libraries are from MPICH but it appears your mpiexec is
+  from Open MPI` — bare `mpiexec` resolves to OpenMPI on multi-MPI
+  machines. Added `mpi_exec()` (`mpiexec` vs `mpiexec.mpich`) and
+  `--with-mpiexec=` to the same arg list (+ test assertions).
+- Local end-to-end (this machine): full MPICH stack built, wheel
+  `rabbit_fem_mpich-2026.9.7` (88.8 MB), 118 pytest pass
+  (after force-reinstalling venv-rotted `numpy`/`netCDF4` — local
+  env only, no repo change), clean-venv wheel install OK, MFEM
+  `curlcurl.i` singleton OK, `mpiexec.mpich -n 4` converged
+  (GMRES 7 iters, 4.5e-13) with CSV outputs.
+
 ## 2026-10-05 — PR #11 verification: all legs green (closing note)
 
 - Windows MPI `37326982065` (59a1187) SUCCESS 1h38m and `37330714164`
