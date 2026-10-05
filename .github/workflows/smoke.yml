@@ -200,6 +200,11 @@ jobs:
             MFEM_MPI_INPUT=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_input_path; print(mfem_input_path('curlcurl'))")
             MFEM_MPI_MESH=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_mesh_path; print(mfem_mesh_path('curlcurl'))")
             mkdir -p /tmp/rabbit-smoke-mfem-mpi-run && cd /tmp/rabbit-smoke-mfem-mpi-run
+            # Pre-create the Outputs tree serially: all ranks racing
+            # `mkdir OutputData` aborts the run when the creation
+            # collides (observed with MPICH `-n 4`); a pre-existing
+            # directory is never created and cannot race.
+            mkdir -p OutputData/CurlCurl
             env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH mpirun $MPIRUN_OVERCOMMIT -n 4 "$SMOKE_BIN" -i "$MFEM_MPI_INPUT" Mesh/file="$MFEM_MPI_MESH"
             ls -la /tmp/rabbit-smoke-mfem-mpi-run/OutputData/CurlCurl/*.csv
             echo "MFEM MPI smoke solve OK"

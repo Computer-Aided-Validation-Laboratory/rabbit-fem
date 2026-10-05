@@ -1,5 +1,56 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — MPICH smoke: multi-rank `mkdir OutputData` race (PR #11)
+
+- **CI run**: MPICH `37326982337` — the MPICH **build** went fully
+  green (PETSc/libMesh/Conduit/WASP/MFEM/MOOSE/Rabbit, wheel staged
+  with the `libmpich` fix, test suite passed). First-ever MPICH
+  smoke run failed at the MFEM `-n 4` proof: the solve itself
+  converged (GMRES 7 iters, 4.5e-13) but every rank aborted with
+  `Could not create directory: OutputData for file base:
+  OutputData/CurlCurl/curlcurl` (`curlcurl.i:143`, CSV output).
+- **First failure addressed here**: MPICH smoke MFEM-MPI leg.
+
+### Root cause
+
+  All 4 ranks enter the CSV output with a missing `OutputData/`
+  directory and race `mkdir`; the losers treat `EEXIST` as fatal.
+  Launcher timing decides: three OpenMPI `-n 4` runs serialized past
+  it, MPICH started all ranks together and collided. Nothing about
+  the wheel, the build, or MPI correctness — purely a test-working-
+  directory setup gap (singleton and `-n 2` flat-file legs can never
+  hit it: no subdirectory creation involved).
+
+### Why the fix addresses the root cause
+
+- `smoke.yml` runs `mkdir -p OutputData/CurlCurl` serially before
+  the `-n 4` invocation. A pre-existing directory is never created,
+  so no rank can race — deterministic under any launcher, and
+  `mkdir -p` is idempotent. Scoped to the one step that writes into
+  a subdirectory; OpenMPI behavior unchanged (its runs also just
+  see an existing dir).
+
+### Platform-specific considerations
+
+- POSIX-shell smoke step (Linux/macOS legs); Windows smoke has no
+  MPI multi-rank proof. No product code touched.
+
+### Files changed
+
+- `.github/workflows/smoke.yml` (`mkdir -p OutputData/CurlCurl`).
+- `dev/log_opencode_fixes.md`.
+
+### How to verify
+
+- CI: next MPICH smoke run should print `MFEM MPI smoke solve OK`.
+- Shell logic is `mkdir -p` (cannot fail when present) + unchanged
+  `mpirun` line; no local MPI launcher needed to review it.
+
+### Remaining uncertainty
+
+- None on this item. (Upstream MOOSE could make the Outputs mkdir
+  `EEXIST`-tolerant, but that is out of scope for this repo.)
+
 ## 2026-10-05 — Windows MPI libMesh: `-lmsmpi` cannot resolve the import lib (PR #11)
 
 - **CI run**: Windows MPI `37322675178` — `Build PETSc` now passes
