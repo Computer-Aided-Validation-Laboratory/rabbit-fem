@@ -1,5 +1,69 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 (CI+local) — MPICH: UCX/IB abort on IB-less runners (PR #11)
+
+- **CI run**: MPICH `37348381898` failed again at `Build MFEM` with
+  the same multipass signature — but the new whole-`build-opt`
+  artifact finally carried `CMakeConfigureLog.yaml`, which shows:
+  compile exitCode 0 (MPICH PETSc links fine with the `--with-cc`
+  pins), run exitCode 15 with `UCX ERROR ibv_create_srq() failed`
+  aborting `MPI_Init_thread` (`MPIDI_UCX_init_world`).
+- **First failure addressed here**: MPICH `Build MFEM` (try_run).
+
+### Root cause (proven from the yaml log + local knob tests)
+
+  Ubuntu MPICH is a `ch4:ucx` build (`mpichversion` confirms). On
+  runners without working InfiniBand, UCX probing hits the dead IB
+  stack and MPICH treats init as fatal instead of falling back — so
+  `MPI_Init` aborts and every `try_run` fails. Runner-dependent:
+  identical code passed MFEM configure on other runners (hence the
+  earlier "flaky" pass). Local knob proof: `UCX_TLS=ib` reproduces a
+  UCX abort here, while the default allowlist runs clean.
+
+### Why the fix addresses the root cause
+
+- `get_linux_tool_env` sets `UCX_TLS=tcp,self,sm` for MPICH builds
+  only (`setdefault`, so a caller-provided value — e.g. multi-node
+  IB users — always wins). `sm`/`self` cover same-node traffic
+  (all CI ranks share a runner); `tcp` keeps single-listener
+  setups working; `ib` is never probed so the abort cannot fire.
+  OpenMPI never sees the variable (it can use UCX itself, so it
+  must not be constrained).
+- `smoke.yml` exports the same default for `mpich` legs only, so
+  solves are as IB-independent as the build probes.
+- Tests: default/override/absent-for-openmpi pinned in
+  `test_build_env.py`.
+
+### Silent-singleton hole found while verifying (same push)
+
+  While proving the knob, local `mpiexec.mpich -n 2` runs showed
+  every rank reporting `0/1`: hydra can fail its PMI handshake and
+  fall back to singletons with exit 0, which hollows out `-n N`
+  proofs (outputs still appear). Added an MPICH-only preflight to
+  `smoke.yml` asserting 4 distinct `$PMI_RANK`s before the solves.
+  (This laptop's own hydra/PMI handshake is broken in a way that
+  also defeats the local `-n 4` demo — same silent singletons, so
+  the local multi-rank proof below is reported honestly as
+  inconclusive; CI smoke is the real multi-rank gate.)
+
+### Files changed
+
+- `scripts/build/linux.py` (`UCX_TLS` default), `scripts/build/common.py`
+  (`mpi_exec()`), `test/test_build_env.py`, `.github/workflows/smoke.yml`.
+
+### Verification
+
+- Local: 49 tests pass; `UCX_TLS=ib` force-fails, default runs.
+- CI: exercising on the MPICH leg (try_run must now pass on any runner).
+
+### Remaining uncertainty / known limitations
+
+- End-user wheels: `rabbit-fem-mpich` on IB-less hardware needs the
+  same `UCX_TLS` treatment at *run* time (document, or set a
+  fallback in the CLI — deliberately left out of this change).
+- Legacy `CMakeError.log` does not exist under CMake 3.31 (yaml log
+  instead) — the whole-tree artifact already accounts for this.
+
 ## 2026-10-05 (local) — Linux MPI: pin PETSc compilers, configure ignores CC env
 
 - **Local run**: MPICH wheel build on Ubuntu noble with both OpenMPI

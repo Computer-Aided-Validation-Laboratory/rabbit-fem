@@ -65,6 +65,48 @@ def test_linux_mpich_uses_suffixed_wrappers(
     assert mpi_fortran_wrapper() == "mpif90.mpich"
 
 
+def test_linux_mpich_defaults_ucx_without_infiniband(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MPICH builds avoid UCX/IB probing unless the caller opts in.
+
+    Regression protection for the CI failure where MFEM's FindPETSc
+    try_run aborted in MPI_Init (UCX ibv_create_srq failed) on runners
+    without working InfiniBand: Ubuntu MPICH is ch4:ucx, and the probe
+    failure depends on runner hardware.
+    """
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "mpich")
+    monkeypatch.delenv("UCX_TLS", raising=False)
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
+    assert env["UCX_TLS"] == "tcp,self,sm"
+
+
+def test_linux_mpich_respects_caller_ucx_tls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit UCX_TLS (e.g. multi-node IB users) always wins."""
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "mpich")
+    monkeypatch.setenv("UCX_TLS", "ib")
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
+    assert env["UCX_TLS"] == "ib"
+
+
+def test_linux_openmpi_leaves_ucx_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The UCX default is MPICH-only; OpenMPI behavior is untouched."""
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.delenv("RABBIT_MPI_IMPL", raising=False)
+    monkeypatch.delenv("UCX_TLS", raising=False)
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
+    assert "UCX_TLS" not in env
+
+
 def test_mpi_impl_defaults_openmpi_and_rejects_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

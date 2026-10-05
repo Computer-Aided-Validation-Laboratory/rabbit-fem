@@ -176,12 +176,32 @@ jobs:
           ls -la /tmp/rabbit-smoke-run/*.e
           if [ "${{ inputs.mpi }}" = "true" ]; then
             # MPI wheel: prove a real multi-rank run converges.
+            if [ "${{ inputs.mpi_impl }}" = "mpich" ]; then
+              # hydra silently runs singletons when its PMI handshake
+              # fails (observed locally: every rank reports 0/1), which
+              # would hollow out every proof below. Fail loudly unless
+              # the launcher really delivers 4 distinct ranks.
+              NRANKS=$(mpirun -n 4 sh -c 'echo $PMI_RANK' | sort -u | wc -l)
+              if [ "$NRANKS" != "4" ]; then
+                echo "::error::mpirun delivered $NRANKS distinct ranks, expected 4"
+                exit 1
+              fi
+              echo "MPICH launcher delivers 4 ranks"
+            fi
             # OpenMPI refuses more ranks than slots without
             # --oversubscribe (small runners); MPICH oversubscribes by
             # default and has no such flag, so exempt it.
             MPIRUN_OVERCOMMIT=""
             if [ "${{ inputs.mpi_impl }}" != "mpich" ]; then
               MPIRUN_OVERCOMMIT="--oversubscribe"
+            else
+              # Same IB-free default as the MPICH build env: UCX probing
+              # aborts MPI_Init where InfiniBand is absent/broken, which
+              # fails multi-rank solves depending on runner hardware.
+              # An explicit caller-provided UCX_TLS always wins.
+              if [ -z "${UCX_TLS:-}" ]; then
+                export UCX_TLS="tcp,self,sm"
+              fi
             fi
             INPUT=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType; print(cube_thermomech_input_path(EElemType.HEX8))")
             mkdir -p /tmp/rabbit-smoke-mpi-run && cd /tmp/rabbit-smoke-mpi-run

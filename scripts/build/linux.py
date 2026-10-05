@@ -16,6 +16,7 @@ from .common import (
     mpi_compiler_env,
     mpi_exec,
     mpi_fortran_wrapper,
+    mpi_impl,
 )
 
 
@@ -286,6 +287,13 @@ def get_linux_tool_env(
     tool_env = dict(os.environ)
     if is_mpi_build():
         tool_env.update(mpi_compiler_env(zigcc_path, zigcxx_path))
+        if mpi_impl() == "mpich":
+            # Ubuntu MPICH is a ch4:ucx build; on machines without
+            # working InfiniBand, UCX probing aborts MPI_Init
+            # (ibv_create_srq failed) which fails CMake try_run
+            # probes and any bare run. Pin IB-free transports unless
+            # the caller already chose (multi-node IB users override).
+            tool_env.setdefault("UCX_TLS", "tcp,self,sm")
     else:
         # Serial/SMP variant: no MPI compiler wrappers anywhere. PETSc
         # falls back to its MPIUNI stubs and libMesh builds serial with
