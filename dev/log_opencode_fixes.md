@@ -1,5 +1,20 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — PR #11 verification: all legs green (closing note)
+
+- Windows MPI `37326982065` (59a1187) SUCCESS 1h38m and `37330714164`
+  (e4c12e1) SUCCESS 1h21m, both incl. `mpiexec -n 2` HEX8 proof —
+  closes the Hypre `.obj`, `mpi.h`, and `-lmsmpi.dll` items above.
+- MPICH `37330715155` (e4c12e1) SUCCESS, build + clean-machine smoke
+  incl. `MFEM MPI smoke solve OK` — closes the `libmpich` staging
+  and `OutputData` race items. (The earlier MPICH MFEM multipass
+  failures never recurred after the first pass and were never
+  root-caused; if they return, the whole-`build-opt` artifact from
+  `fdf9428` will carry the evidence.)
+- MPI/MFEM Linux green ×4 (incl. `--oversubscribe` smoke proofs);
+  serial Linux/macOS/Windows green throughout (compartmentalisation
+  held — no serial/macOS leg broke at any point).
+
 ## 2026-10-05 — MPICH smoke: multi-rank `mkdir OutputData` race (PR #11)
 
 - **CI run**: MPICH `37326982337` — the MPICH **build** went fully
