@@ -456,6 +456,7 @@ def test_linux_mpi_pins_mpi_compilers_for_petsc(
     assert "--with-cc=mpicc" in cmd
     assert "--with-cxx=mpicxx" in cmd
     assert "--with-fc=mpif90" in cmd
+    assert "--with-mpiexec=mpiexec" in cmd
 
 
 def test_linux_mpich_pins_suffixed_compilers_for_petsc(
@@ -468,3 +469,4 @@ def test_linux_mpich_pins_suffixed_compilers_for_petsc(
     assert "--with-cc=mpicc.mpich" in cmd
     assert "--with-cxx=mpicxx.mpich" in cmd
     assert "--with-fc=mpif90.mpich" in cmd
+    assert "--with-mpiexec=mpiexec.mpich" in cmd

@@ -426,6 +426,19 @@ def mpi_fortran_wrapper() -> str:
     return "mpif90"
 
 
+def mpi_exec() -> str:
+    """MPI launcher for the selected implementation.
+
+    Mirrors :func:`mpi_fortran_wrapper`: the explicit
+    ``mpiexec.mpich`` keeps MPICH runs off a foreign default launcher
+    (PETSc aborts configure when MPICH libraries meet an Open MPI
+    mpiexec). Serial builds never consult it.
+    """
+    if is_mpi_build() and mpi_impl() == "mpich":
+        return "mpiexec.mpich"
+    return "mpiexec"
+
+
 def build_rabbit_binary(
     repo_dir: Path,
     moose_dir: Path,

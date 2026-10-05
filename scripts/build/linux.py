@@ -14,6 +14,7 @@ from .common import (
     find_python_exe,
     is_mpi_build,
     mpi_compiler_env,
+    mpi_exec,
     mpi_fortran_wrapper,
 )
 
@@ -335,6 +336,7 @@ def build_petsc(
                 f"--with-cc={petsc_env['CC']}",
                 f"--with-cxx={petsc_env['CXX']}",
                 f"--with-fc={mpi_fortran_wrapper()}",
+                f"--with-mpiexec={mpi_exec()}",
             ]
             subprocess.run(
                 [
