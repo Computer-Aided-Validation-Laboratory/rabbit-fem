@@ -490,6 +490,9 @@ def find_needed_libraries(
         "libmpi.so",
         "libmpi_",
         "libmpi_cxx.so",
+        # MPICH runtime stays external like OpenMPI above (the wheel
+        # links the system MPI ecosystem; smoke installs libmpich12).
+        "libmpich",
         "libopen-pal.so",
         "libopen-rte.so",
         "libhwloc.so",
@@ -853,8 +856,15 @@ def stage_artifacts(
                 patchelf_bin = str(cand)
                 break
 
-        rpath_app = "$ORIGIN/../lib:/usr/lib/x86_64-linux-gnu/openmpi/lib"
-        rpath_lib = "$ORIGIN:/usr/lib/x86_64-linux-gnu/openmpi/lib"
+        if is_mpi_build() and mpi_impl() == "mpich":
+            # MPICH libs live in the default loader path
+            # (/usr/lib/x86_64-linux-gnu via libmpich12), so only the
+            # relocatable entries are needed.
+            rpath_app = "$ORIGIN/../lib"
+            rpath_lib = "$ORIGIN"
+        else:
+            rpath_app = "$ORIGIN/../lib:/usr/lib/x86_64-linux-gnu/openmpi/lib"
+            rpath_lib = "$ORIGIN:/usr/lib/x86_64-linux-gnu/openmpi/lib"
 
         subprocess.run(
             [patchelf_bin, "--set-rpath", rpath_app, str(dest_bin)],

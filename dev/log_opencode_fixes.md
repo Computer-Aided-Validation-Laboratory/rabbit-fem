@@ -1,5 +1,133 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — MPICH staging (libmpich external) + MPI smoke --oversubscribe + windows-mpi setup-msys2 input (PR #11)
+
+- **CI runs** (all PR #11, push `a76b3c0`, ~10:05 UTC): Windows MPI
+  `37294305947` (`Build PETSc` fails in Hypre `make`), MPICH
+  `37294306393` (`Build Rabbit...` fails in `stage_artifacts`), MPI/MFEM
+  `37294306356` (build green, `MPI: Clean-machine smoke test`
+  `111729704202` fails at `mpirun -n 4`).
+- **First failure addressed here**: MPICH `37294306393` staging abort
+  and MPI smoke slot refusal (both root-caused from logs); plus the
+  `msys2-location` warning on the Windows MPI job. The Windows Hypre
+  `make` failure is diagnosed below but deliberately left unpatched
+  (no speculative changes; needs build-tree evidence).
+
+### Root cause 1 (MPICH): MPI-ecosystem libs not excluded from staging
+
+`stage_artifacts` (`scripts/build/common.py::find_needed_libraries`)
+  treats `DT_NEEDED` entries as system-external only by prefix
+  (`libmpi.so`, `libmpi_cxx.so`, `libopen-pal.so`, ... — the OpenMPI
+  ecosystem, left external by design with the runtime installed in
+  smoke). MPICH SONAMEs (`libmpich.so.12`, `libmpichcxx.so.12`,
+  `libmpichfort.so.12`, from Ubuntu `libmpich12` in
+  `/usr/lib/x86_64-linux-gnu`) match none of those prefixes, so they
+  fall through to `available_libs` lookup (repo/moose trees + ELF
+  RPATH + OpenMP index), miss everywhere, and raise
+  `FileNotFoundError: ... required shared libraries were not found`.
+  Companion defect: the patchelf RPATH hardcodes the OpenMPI dir
+  (`/usr/lib/x86_64-linux-gnu/openmpi/lib`) for every Linux wheel,
+  which is a nonexistent path on MPICH runners.
+
+### Why the fix addresses root cause 1
+
+- `"libmpich"` added to `system_prefixes`: MPICH runtime stays
+  external exactly like OpenMPI (smoke already installs `mpich` when
+  `mpi_impl == mpich`), so staging no longer demands a vendored copy.
+  Prefix form covers `.so.12`/`cxx`/`fort` variants without hardcoding
+  versions or absolute paths.
+- `stage_artifacts` RPATH is now MPI-aware: MPICH wheels get only the
+  relocatable `$ORIGIN` entries (MPICH libs resolve via the default
+  loader path); serial and OpenMPI RPATHs are byte-identical to
+  before. Serial never calls `mpi_impl()` (short-circuit), Windows
+  (`win32`) takes the same `else` branch as before since its
+  `RABBIT_MPI_IMPL` defaults to `openmpi`.
+
+### Root cause 2 (MPI smoke): OpenMPI slot refusal on small runners
+
+  `mpirun -n 4` for the MFEM multi-rank proof fails with "There are not
+  enough slots available" (2-slot runners). The `-n 2` leg passed only
+  incidentally. OpenMPI's documented remedy is `--oversubscribe`;
+  MPICH's `mpirun` has no such flag (it oversubscribes by default), so
+  a blanket flag would break the MPICH leg.
+
+### Why the fix addresses root cause 2
+
+- `smoke.yml` sets `MPIRUN_OVERCOMMIT=--oversubscribe` unless
+  `mpi_impl == mpich` (empty otherwise), applied to both `-n 2` and
+  `-n 4` invocations. Serial legs never enter the branch; MPICH
+  commands render identically to before. No sleeps/retries; the flag
+  is the documented slot policy, not a workaround.
+
+### Root cause 3 (Windows MPI workflow): invalid setup-msys2 input
+
+  Job annotations on every Windows MPI run: `Unexpected input(s)
+  'msys2-location'` (valid: `location`, ...). The action ignores the
+  unknown key and provisions a throwaway MSYS2, while `ps1` builds in
+  the image tree — wasteful and confusing. One-word fix to the
+  documented input, MPI workflow only (serial green build untouched).
+
+### Windows Hypre make failure: diagnosis, no patch yet
+
+- Evidence from the uploaded `configure.log` (`37294305947`): Hypre
+  `configure` ran with our explicit `--host=x86_64-w64-mingw32` and
+  reports `checking for suffix of object files... obj` plus
+  `checking for mpi.h... no` / `checking for MPI_Comm_f2c... no`,
+  then `make -j4` compiles `src/utilities` (echoed `zig-cc ... -c
+  F90_HYPRE_error.c` lines, no compiler diagnostics) and dies at
+  `zig-ar cr libHYPRE_utilities.a F90_HYPRE_error.o ...` with
+  `ar: error: F90_HYPRE_error.o: No such file or directory`.
+- What this rules out: the `--host` fix worked (configure completes);
+  serial PETSc (no Hypre) is unaffected. What is still unknown: why
+  `mpi.h` was not found despite `-I/c/msys64/mingw64/include`
+  (header installed by the same script into the same `$MsysRoot`
+  tree), and why zero-object compiles return success (OBJEXT=`obj`
+  vs `zig cc -target x86_64-windows-gnu` default `.o` mismatch is one
+  hypothesis; swallowed diagnostics is another). Hypre's own
+  `config.log` (in `externalpackages/git.hypre/src/`) is not in the
+  failure artifact, so the conftest failure reason is not observable.
+- Next step (next watch tick): extend the `Upload build failure logs`
+  step with `moose/petsc/arch-windows-opt/externalpackages/git.hypre/src/config.log`
+  (and keep the change diagnostic-only), then root-cause from real
+  evidence. No build-behavior change made here.
+
+### Platform-specific considerations
+
+- `common.py`: Linux ELF path only in effect; `darwin` branch and
+  `win32` outcome unchanged (verified by branch analysis above).
+- `smoke.yml`: shell/POSIX only; Windows smoke steps untouched.
+- `windows_mpi_build_and_test.yml`: single key rename; serial
+  `windows_build_and_test.yml` deliberately untouched while green.
+- No hardcoded paths/users/drives: MPICH match is a SONAME prefix,
+  RPATH uses `$ORIGIN`/documented system dir, smoke branches on the
+  existing `mpi_impl` input.
+
+### Files changed
+
+- `scripts/build/common.py` (`system_prefixes` + MPI-aware RPATH).
+- `test/test_staging.py` (new `test_mpich_libs_treated_as_system` +
+  `readelf` fake).
+- `.github/workflows/smoke.yml` (`MPIRUN_OVERCOMMIT`).
+- `.github/workflows/windows_mpi_build_and_test.yml`
+  (`msys2-location` -> `location`).
+
+### How to verify
+
+- Local: `.venv/bin/python -m pytest test/test_staging.py
+  test/test_build_env.py` → 31 passed (incl. the new MPICH test).
+- YAML: both edited workflows parse (`yaml.safe_load`).
+- CI: next MPICH round should pass `stage_artifacts` to wheel
+  packaging; next MPI smoke should pass the `-n 4` MFEM proof;
+  Windows MPI should lose the `msys2-location` annotation (Hypre
+  `make` still expected to fail until root-caused).
+
+### Remaining uncertainty
+
+- Windows Hypre `make` (see above): no patch until `config.log`
+  evidence. If the `mpi.h` miss is a two-tree artifact, the
+  `location` fix here may already change its presentation — the next
+  log will tell.
+
 ## 2026-10-05 — Windows MPI: explicit --host for Hypre download (PR #11)
 
 - **CI run**: Windows MPI `37290786009`, `Build PETSc` failed after

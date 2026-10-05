@@ -176,9 +176,16 @@ jobs:
           ls -la /tmp/rabbit-smoke-run/*.e
           if [ "${{ inputs.mpi }}" = "true" ]; then
             # MPI wheel: prove a real multi-rank run converges.
+            # OpenMPI refuses more ranks than slots without
+            # --oversubscribe (small runners); MPICH oversubscribes by
+            # default and has no such flag, so exempt it.
+            MPIRUN_OVERCOMMIT=""
+            if [ "${{ inputs.mpi_impl }}" != "mpich" ]; then
+              MPIRUN_OVERCOMMIT="--oversubscribe"
+            fi
             INPUT=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType; print(cube_thermomech_input_path(EElemType.HEX8))")
             mkdir -p /tmp/rabbit-smoke-mpi-run && cd /tmp/rabbit-smoke-mpi-run
-            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH mpirun -n 2 "$SMOKE_BIN" -i "$INPUT" Executioner/end_time=1
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH mpirun $MPIRUN_OVERCOMMIT -n 2 "$SMOKE_BIN" -i "$INPUT" Executioner/end_time=1
             ls -la /tmp/rabbit-smoke-mpi-run/*.e
             echo "MPI smoke solve OK"
             # MPI wheel with the MFEM backend: prove the packaged Maxwell
@@ -193,7 +200,7 @@ jobs:
             MFEM_MPI_INPUT=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_input_path; print(mfem_input_path('curlcurl'))")
             MFEM_MPI_MESH=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_mesh_path; print(mfem_mesh_path('curlcurl'))")
             mkdir -p /tmp/rabbit-smoke-mfem-mpi-run && cd /tmp/rabbit-smoke-mfem-mpi-run
-            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH mpirun -n 4 "$SMOKE_BIN" -i "$MFEM_MPI_INPUT" Mesh/file="$MFEM_MPI_MESH"
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH mpirun $MPIRUN_OVERCOMMIT -n 4 "$SMOKE_BIN" -i "$MFEM_MPI_INPUT" Mesh/file="$MFEM_MPI_MESH"
             ls -la /tmp/rabbit-smoke-mfem-mpi-run/OutputData/CurlCurl/*.csv
             echo "MFEM MPI smoke solve OK"
           else
