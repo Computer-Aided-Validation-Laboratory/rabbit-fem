@@ -36,12 +36,48 @@ def test_linux_mpi_uses_mpi_wrappers(
 ) -> None:
     """Linux MPI builds compile through mpicc redirected at Zig."""
     monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.delenv("RABBIT_MPI_IMPL", raising=False)
     zigcc, zigcxx = _fake_wrappers(tmp_path)
     env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
     assert env["CC"] == "mpicc"
     assert env["CXX"] == "mpicxx"
     assert env["OMPI_CC"] == str(zigcc)
     assert env["OMPI_CXX"] == str(zigcxx)
+
+
+def test_linux_mpich_uses_suffixed_wrappers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MPICH builds select explicit .mpich wrappers (alternatives-proof)."""
+    from build.common import mpi_fortran_wrapper, mpi_impl
+
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "mpich")
+    assert mpi_impl() == "mpich"
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
+    assert env["CC"] == "mpicc.mpich"
+    assert env["CXX"] == "mpicxx.mpich"
+    assert env["MPICH_CC"] == str(zigcc)
+    assert env["MPICH_CXX"] == str(zigcxx)
+    assert "OMPI_CC" not in env
+    assert "OMPI_CXX" not in env
+    assert mpi_fortran_wrapper() == "mpif90.mpich"
+
+
+def test_mpi_impl_defaults_openmpi_and_rejects_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset impl means OpenMPI; garbage fails early, not deep in CMake."""
+    from build.common import mpi_fortran_wrapper, mpi_impl
+
+    monkeypatch.delenv("RABBIT_MPI_IMPL", raising=False)
+    assert mpi_impl() == "openmpi"
+    monkeypatch.delenv("RABBIT_MPI", raising=False)
+    assert mpi_fortran_wrapper() == "mpif90"
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "bogus-mpi")
+    with pytest.raises(RuntimeError, match="RABBIT_MPI_IMPL"):
+        mpi_impl()
 
 
 def test_linux_serial_bypasses_mpi_wrappers(

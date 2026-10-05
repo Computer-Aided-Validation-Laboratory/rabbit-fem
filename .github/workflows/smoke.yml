@@ -24,6 +24,11 @@ on:
         required: false
         default: false
         type: boolean
+      mpi_impl:
+        description: "MPI implementation runtime for MPI smoke runs (openmpi or mpich)"
+        required: false
+        default: "openmpi"
+        type: string
       python-version:
         description: "Python version for the clean smoke venv (compat matrix)"
         required: false
@@ -133,12 +138,16 @@ jobs:
         if: inputs.platform != 'windows'
         run: |
           if [ "${{ inputs.platform }}" = "linux" ]; then
-            # The wheel links system OpenMPI by design (MPI libs are
-            # excluded from staging; RPATH falls back to the system
-            # openmpi lib dir), so the runtime must be present even for
-            # serial runs.
-            sudo apt-get update
-            sudo apt-get install -y openmpi-bin
+            # The wheel links its MPI ecosystem externally by design, so
+            # the matching runtime must be present. Only one MPI ships
+            # per runner, so bare mpirun resolves deterministically.
+            if [ "${{ inputs.mpi_impl }}" = "mpich" ]; then
+              sudo apt-get update
+              sudo apt-get install -y mpich
+            else
+              sudo apt-get update
+              sudo apt-get install -y openmpi-bin
+            fi
           fi
           uv venv /tmp/rabbit-smoke --python ${{ inputs.python-version }}
           uv pip install --python /tmp/rabbit-smoke/bin/python dist/*.whl

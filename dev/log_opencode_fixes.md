@@ -1,5 +1,36 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — rabbit-fem-mpich variant + 3.9 floor legs removed (PR #11)
+
+- **Scope**: `rabbit-fem-mpich` mirrors the OpenMPI/MFEM stack
+  (PETSc/libMesh/Conduit/WASP/MFEM, `--with-mfem`) on the MPICH
+  toolchain. Audit showed MOOSE's installer scripts are MPI-generic
+  (no OpenMPI assumptions), so the variant is small by construction:
+  `RABBIT_MPI_IMPL=mpich` selects explicit `mpicc.mpich`/`mpicxx.mpich`/
+  `mpif90.mpich` wrappers (Debian suffix convention, verified against
+  this box's `.openmpi` suffixes — immune to update-alternatives
+  state) with `MPICH_CC/CXX` pointing at the zig wrappers; garbage
+  values fail early. Wheel publishes as `rabbit-fem-mpich` (own PyPI
+  project, user-owned at release); `variant.txt` stays `mpi` (the CLI
+  is impl-agnostic; `PMI_SIZE` detection already covers MPICH).
+- **Isolation**: all caches carry `-mpich` keys; serial and OpenMPI
+  stacks untouched (default impl is openmpi; serial never consults it).
+  Smoke gains an `mpi_impl` input (default openmpi, so all existing
+  callers are byte-identical) selecting the runtime package per leg.
+- **Floor removal**: the three `*-floor` jobs (3.9 negative legs)
+  deleted per request — the `src` guard + `requires-python` floor +
+  `test_python_floor.py` stay as product behavior.
+- **Files changed**: `scripts/build/{common,linux}.py`,
+  `test/test_build_env.py` (impl switch tests),
+  `.github/workflows/linux_mpich_build_and_test.yml` (new),
+  `.github/workflows/smoke.yml` (`mpi_impl`),
+  `.github/workflows/{linux,macos,windows}_build_and_test.yml`
+  (floor legs removed), `dev/log_opencode_fixes.md`.
+- **Verification**: all 8 workflow YAMLs parse; 52 unit tests pass.
+  Live proof is PR #11 CI (cold `-mpich` dep caches expected).
+- **Remaining uncertainty**: MOOSE PETSc script acceptance of the
+  mpich wrappers, MPICH runtime weight — first CI round decides.
+
 ## 2026-10-05 — Windows MPI: MS-MPI landed in the wrong MSYS2 tree (PR #11)
 
 - **CI run**: Windows MPI `37280476119`, step `Build PETSc` failed in

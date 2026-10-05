@@ -280,47 +280,6 @@ jobs:
       python-version: ${{ matrix.python }}
       run-gold: true
 
-  # Negative leg for the 3.9 report on Windows (pwsh spelling of the
-  # same floor assertion as linux-floor; no build artifact needed).
-  windows-floor:
-    name: "Windows: Python 3.9 floor message"
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - name: "Floor: Checkout repository"
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          submodules: false
-
-      - name: "Floor: Set up uv"
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-          enable-cache: true
-
-      - name: "Floor: Assert clear error on Python 3.9"
-        run: |
-          uv python install 3.9
-          $UVPY = ((uv python find 3.9) | Out-String).Trim()
-          $env:PYTHONPATH = "src"
-          & $UVPY -c "import rabbit" 2>&1 | Tee-Object floor.log
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "::error::'import rabbit' succeeded on Python 3.9; expected the 3.10-floor error."
-            exit 1
-          }
-          if (-not (Select-String -Path floor.log -Pattern "requires Python 3.10" -Quiet)) {
-            Write-Host "::error::Python 3.9 error message does not mention the 3.10 floor."
-            exit 1
-          }
-          Write-Host "Floor guard OK: Python 3.9 fails with the clear message."
-          # The probed `import rabbit` exits 1 by design, and pwsh keeps
-          # that native exit in $LASTEXITCODE past the Write-Host above;
-          # GitHub fails pwsh steps on a nonzero trailing $LASTEXITCODE,
-          # so report this step's own verdict explicitly. Both failure
-          # modes already `exit 1` above -- this line only runs on success.
-          exit 0
-
   # Mamba smoke (Windows): same shape as linux/mac-mamba, pwsh spelling
   # — wheel pip-installed into a conda-managed python=3.13 env on a
   # clean runner, solve-only. Every native call is success-asserted

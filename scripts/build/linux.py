@@ -13,6 +13,8 @@ from .common import (
     ensure_serial_mpi_fallback,
     find_python_exe,
     is_mpi_build,
+    mpi_compiler_env,
+    mpi_fortran_wrapper,
 )
 
 
@@ -282,10 +284,7 @@ def get_linux_tool_env(
     """Prepare environment variables for building Linux dependencies."""
     tool_env = dict(os.environ)
     if is_mpi_build():
-        tool_env["OMPI_CC"] = str(zigcc_path)
-        tool_env["OMPI_CXX"] = str(zigcxx_path)
-        tool_env["CC"] = "mpicc"
-        tool_env["CXX"] = "mpicxx"
+        tool_env.update(mpi_compiler_env(zigcc_path, zigcxx_path))
     else:
         # Serial/SMP variant: no MPI compiler wrappers anywhere. PETSc
         # falls back to its MPIUNI stubs and libMesh builds serial with
@@ -527,7 +526,7 @@ def build_mfem(
     # MPI Fortran compiler (plain gfortran leaves MPI_Fortran_* empty
     # and the configure fails). CC/CXX already select the MPI C/C++
     # wrappers via get_linux_tool_env.
-    tool_env["FC"] = "mpif90"
+    tool_env["FC"] = mpi_fortran_wrapper()
     subprocess.run(
         ["./scripts/update_and_rebuild_mfem.sh"],
         cwd=str(moose_dir),

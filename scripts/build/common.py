@@ -376,6 +376,56 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
             time.sleep(30)
 
 
+def mpi_impl() -> str:
+    """Which MPI implementation the MPI variant builds against.
+
+    ``openmpi`` (default) or ``mpich``, selected by ``RABBIT_MPI_IMPL``.
+    Only meaningful when :func:`is_mpi_build` is true; the serial build
+    never consults it. Explicit suffixed wrapper names
+    (``mpicc.mpich``) keep the selection immune to the machine's
+    update-alternatives state.
+    """
+    impl = os.environ.get("RABBIT_MPI_IMPL", "openmpi").strip().lower()
+    if impl not in ("openmpi", "mpich"):
+        raise RuntimeError(
+            f"Unknown MPI implementation {impl!r} in RABBIT_MPI_IMPL; "
+            'expected "openmpi" or "mpich".'
+        )
+    return impl
+
+
+def mpi_compiler_env(
+    zigcc_path: Path, zigcxx_path: Path
+) -> dict[str, str]:
+    """Compiler selection for MPI builds, by implementation.
+
+    OpenMPI wrappers read ``OMPI_CC``/``OMPI_CXX``; MPICH wrappers read
+    ``MPICH_CC``/``MPICH_CXX`` (both documented wrapper variables).
+    MPICH names are explicitly suffixed so a machine with both runtimes
+    still resolves deterministically.
+    """
+    if mpi_impl() == "mpich":
+        return {
+            "MPICH_CC": str(zigcc_path),
+            "MPICH_CXX": str(zigcxx_path),
+            "CC": "mpicc.mpich",
+            "CXX": "mpicxx.mpich",
+        }
+    return {
+        "OMPI_CC": str(zigcc_path),
+        "OMPI_CXX": str(zigcxx_path),
+        "CC": "mpicc",
+        "CXX": "mpicxx",
+    }
+
+
+def mpi_fortran_wrapper() -> str:
+    """MPI Fortran wrapper for the selected implementation."""
+    if is_mpi_build() and mpi_impl() == "mpich":
+        return "mpif90.mpich"
+    return "mpif90"
+
+
 def build_rabbit_binary(
     repo_dir: Path,
     moose_dir: Path,
@@ -399,10 +449,7 @@ def build_rabbit_binary(
     env["MOOSE_DIR"] = str(moose_dir)
     env["METHODS"] = "opt"
     if is_mpi_build():
-        env["OMPI_CC"] = str(zigcc_path)
-        env["OMPI_CXX"] = str(zigcxx_path)
-        env["CC"] = "mpicc"
-        env["CXX"] = "mpicxx"
+        env.update(mpi_compiler_env(zigcc_path, zigcxx_path))
     else:
         env["CC"] = str(zigcc_path)
         env["CXX"] = str(zigcxx_path)
@@ -829,16 +876,20 @@ def stage_artifacts(
 def build_wheel(repo_dir: Path) -> Path:
     """Build standalone Python wheel package and tag appropriately.
 
-    The MPI variant is published under the ``rabbit-fem-mpi`` project
-    name; the default serial/SMP build keeps ``rabbit-fem``.
+    MPI variants are published under their own project names
+    (``rabbit-fem-mpi`` for OpenMPI, ``rabbit-fem-mpich`` for MPICH);
+    the default serial/SMP build keeps ``rabbit-fem``.
     """
     print("--> Building standalone wheel package...")
     pyproject_file = repo_dir / "pyproject.toml"
     original_pyproject = pyproject_file.read_text(encoding="utf-8")
     renamed = False
     if is_mpi_build():
+        dist_name = (
+            "rabbit-fem-mpich" if mpi_impl() == "mpich" else "rabbit-fem-mpi"
+        )
         renamed_text = original_pyproject.replace(
-            'name = "rabbit-fem"', 'name = "rabbit-fem-mpi"', 1
+            'name = "rabbit-fem"', f'name = "{dist_name}"', 1
         )
         if renamed_text == original_pyproject:
             raise RuntimeError(
