@@ -390,7 +390,11 @@ if ($Stage -in @("all", "petsc")) {
         if ($IsMpi) {
             $MpiIncPosix = "$MsysRootPosix/mingw64/include"
             $MpiLibPosix = "$MsysRootPosix/mingw64/lib/libmsmpi.dll.a"
-            $petscMpiFlags = "--with-mpi=1 --with-mpi-compilers=0 --with-mpi-include=$MpiIncPosix --with-mpi-lib=$MpiLibPosix --download-hypre=1"
+            # --download-hypre-configure-arguments: Hypre's autotools
+            # config.guess cannot determine the MSYS host (dies with
+            # 'invalid value of canonical host'), so name it explicitly.
+            # Same mingw64 target the whole toolchain builds for.
+            $petscMpiFlags = "--with-mpi=1 --with-mpi-compilers=0 --with-mpi-include=$MpiIncPosix --with-mpi-lib=$MpiLibPosix --download-hypre=1 --download-hypre-configure-arguments=--host=x86_64-w64-mingw32"
         } else {
             $petscMpiFlags = "--with-mpi=0"
         }

@@ -1,5 +1,28 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — Windows MPI: explicit --host for Hypre download (PR #11)
+
+- **CI run**: Windows MPI `37290786009`, `Build PETSc` failed after
+  ~11 min: `Error running configure on HYPRE`. MPI detection itself
+  passed (configure reached the download stage).
+- **Root cause**: Hypre's autotools `config.guess` cannot determine the
+  MSYS host (`checking host system type...` empty, then `configure:
+  error: invalid value of canonical host`). PETSc forwards toolchain
+  variables but no host, so the download configure dies before
+  compiling anything.
+- **Fix**: `--download-hypre-configure-arguments=--host=x86_64-w64-mingw32`
+  on the MPI PETSc flags (PETSc's documented per-download passthrough;
+  verified to exist in-tree at `config/package.py:1780`). Explicit and
+  correct: the whole toolchain already targets `x86_64-w64-mingw32`
+  (libMesh `--host` uses the same value). Serial flags untouched.
+- **Files changed**:
+  `scripts/install_dependencies_windows.ps1`,
+  `dev/log_opencode_fixes.md`.
+- **Verification**: no unit-test surface (ps1 flag string); live proof
+  is the next Windows MPI round (Hypre configure proceeds to compile).
+- **Remaining uncertainty**: Hypre compile/link under zig-cc wrappers
+  (next stage decides, fails loudly if not).
+
 ## 2026-10-05 — Windows serial: MSYS2 mirror 429s + Windows MPI: libmsmpi.dll.a (PR #11)
 
 - **CI runs**: serial `37287530177` failed in `Build WASP and HIT`
