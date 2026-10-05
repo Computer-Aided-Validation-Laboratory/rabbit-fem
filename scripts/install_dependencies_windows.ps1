@@ -461,9 +461,13 @@ done
         # (CPPFLAGS/LDFLAGS since there are no mpicc wrappers) and keep
         # the PETSc-Hypre requirement: MPI PETSc ships Hypre (see the
         # --download-hypre flag above), which the MPI suite needs.
+        # NOTE: the import lib must be spelled -lmsmpi.dll (resolves
+        # libmsmpi.dll.a). Bare -lmsmpi only searches libmsmpi.a,
+        # which does not exist, so the C compiler check fails with
+        # "cannot create executables" (verified against zig 0.16.0).
         if ($IsMpi) {
             $MpiIncPosix = "$MsysRootPosix/mingw64/include"
-            $libmeshMpiEnv = "CPPFLAGS=`"-I$MpiIncPosix`" LDFLAGS=`"-L$MsysRootPosix/mingw64/lib -lmsmpi`" "
+            $libmeshMpiEnv = "CPPFLAGS=`"-I$MpiIncPosix`" LDFLAGS=`"-L$MsysRootPosix/mingw64/lib -lmsmpi.dll`" "
             $libmeshMpiFlags = "--with-mpi"
             $libmeshHypreFlag = ""
         } else {

@@ -1,5 +1,59 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — Windows MPI libMesh: `-lmsmpi` cannot resolve the import lib (PR #11)
+
+- **CI run**: Windows MPI `37322675178` — `Build PETSc` now passes
+  (the zig `-o <stem>.o` + `RABBIT_MPI_INCLUDE` fixes work: PETSc
+  linklibs show `-lHYPRE ... -lmsmpi.dll`, Hypre built with MPI).
+  New gate: `Build libMesh` fails at
+  `checking for x86_64-w64-mingw32-mpicc... <zig-cc>` then
+  `C compiler cannot create executables`.
+- **First failure addressed here**: Windows MPI `Build libMesh`.
+
+### Root cause (proven locally, not assumed)
+
+  `libmeshMpiEnv` set `LDFLAGS="-L.../mingw64/lib -lmsmpi"`, but the
+  only import lib on disk is `libmsmpi.dll.a` (established in
+  `99d860f`; the MPI package ships no `libmsmpi.a`). Verified with
+  zig 0.16.0 + a scratch `libbaz.dll.a`: bare `-lbaz` searches
+  `baz.dll`, `baz.lib`, `libbaz.a` and fails, while `-lbaz.dll`
+  resolves `libbaz.dll.a` and links. So the libMesh compiler
+  self-test (compile+link a trivial program with the MPI LDFLAGS)
+  could never link. Same spelling PETSc uses successfully
+  (`-lmsmpi.dll`, visible in its recorded linklibs).
+
+### Why the fix addresses the root cause
+
+- One-word change: `-lmsmpi` -> `-lmsmpi.dll` in `libmeshMpiEnv`.
+  Serial branch untouched; no other `-lmsmpi` spellings exist in
+  the script. Also added `moose/libmesh/config.log` to the
+  `windows-mpi-build-failure-logs` artifact so the next frontier
+  (WASP/MOOSE/Rabbit) is diagnosable the same way.
+
+### Platform-specific considerations
+
+- Windows-MPI-only lines (`$IsMpi` branch + MPI workflow artifact);
+  serial Windows/Linux/macOS untouched.
+
+### Files changed
+
+- `scripts/install_dependencies_windows.ps1` (`-lmsmpi.dll`).
+- `.github/workflows/windows_mpi_build_and_test.yml`
+  (`moose/libmesh/config.log` in failure logs).
+- `dev/log_opencode_fixes.md`.
+
+### How to verify
+
+- Local: scratch import-lib link test above (`-lbaz` fails,
+  `-lbaz.dll` links).
+- CI: next Windows MPI round should pass `Build libMesh` configure
+  (watch for `C compiler works... yes` past the mpicc probe).
+
+### Remaining uncertainty
+
+- None on this item. Next frontier on this leg: WASP/MOOSE/Rabbit
+  stages (unreached so far).
+
 ## 2026-10-05 — Windows MPI Hypre: zig `.obj` default + invisible `mpi.h` (PR #11)
 
 - **CI runs**: Windows MPI `37294305947`, `37309458638`, `37312695933`
@@ -109,6 +163,12 @@
   benign, flagged for the next log read.
 - MPICH MFEM compile-vs-run (pending `CMakeError.log` + the
   MPI/MFEM-leg verdict).
+- Follow-up: literal `CMakeError.log`/`CMakeOutput.log` artifact
+  paths found nothing (`fdf9428` broadens the upload to the whole
+  `build-opt/` tree — the legacy names may not exist under CMake
+  3.31's configure log). MPI-leg `37312696366` went fully green,
+  including a fresh full-rebuild MFEM configure, so the MPICH
+  multipass failure is MPICH-specific, not shared PETSc staleness.
 
 ## 2026-10-05 — MPICH staging (libmpich external) + MPI smoke --oversubscribe + windows-mpi setup-msys2 input (PR #11)
 
