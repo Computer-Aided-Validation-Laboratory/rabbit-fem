@@ -127,6 +127,12 @@
   evidence. If the `mpi.h` miss is a two-tree artifact, the
   `location` fix here may already change its presentation — the next
   log will tell.
+- Follow-up (pushed after seeing `37309458638` fail identically):
+  `windows-mpi-build-failure-logs` now also uploads
+  `externalpackages/git.hypre/src/config.log` (diagnostic-only, still
+  `if-no-files-found: ignore`), so the next round carries the
+  `mpi.h... no` conftest reason. `location` fix confirmed effective —
+  the `msys2-location` annotation is gone on the new run.
 
 ## 2026-10-05 — Windows MPI: explicit --host for Hypre download (PR #11)
 

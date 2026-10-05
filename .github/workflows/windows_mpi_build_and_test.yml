@@ -250,4 +250,5 @@ jobs:
             last_step.log
             paste_url.txt
             moose/petsc/arch-windows-opt/lib/petsc/conf/configure.log
+            moose/petsc/arch-windows-opt/externalpackages/git.hypre/src/config.log
           if-no-files-found: ignore
