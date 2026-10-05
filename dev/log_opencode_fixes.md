@@ -1,5 +1,34 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-05 — Windows MPI first go (branch windows-mpi, PR #11)
+
+- **Scope**: initial Windows MPI variant assuming system MPI (MS-MPI), no
+  MFEM (the MPI/MFEM backend stays Linux-only). New `windows_mpi_...`
+  workflow: own `windows-mpi-*` cache keys (never shares state with the
+  serial Windows stack), MS-MPI via `mpi4py/setup-mpi@v1` (SDK+runtime,
+  `mpiexec` on PATH) plus MinGW import lib/headers via
+  `mingw-w64-x86_64-msmpi` (the zig toolchain targets
+  `x86_64-windows-gnu`, so the MinGW `.a` links cleanly — no
+  space-in-path MSVC `.lib` quoting games). `ps1` changes are strictly
+  gated on `$IsMpi = ($env:RABBIT_MPI -eq "1")`: PETSc
+  `--with-mpi=1 --with-mpi-compilers=0` + explicit include/lib (MS-MPI
+  ships no mpicc wrappers) + `--download-hypre=1` (MPI suite runs
+  without the serial ILU fallback); libMesh `--with-mpi` via
+  CPPFLAGS/LDFLAGS with the Hypre requirement kept; `variant.txt`
+  `mpi` vs `serial`. Serial expansions verified identical (only
+  whitespace delta). Test suite + `mpiexec -n 2` HEX8 proof; no
+  compat/floor/mamba/smoke legs until the build is green.
+- **CI cost note**: `scripts/**` is in the serial Windows wheel+dep
+  keys, so serial cold-rebuilds once (standard file-granular cost).
+- **Files changed**: `scripts/install_dependencies_windows.ps1`,
+  `.github/workflows/windows_mpi_build_and_test.yml` (new),
+  `dev/log_opencode_fixes.md`.
+- **Verification**: workflow YAML parses; 50 unit tests pass; serial
+  ps1 expansions traced identical. Live proof is PR #11 CI.
+- **Remaining uncertainty**: PETSc/libMesh acceptance of the MS-MPI
+  flags, Hypre download weight on MSYS, `mpiexec`/firewall behaviour —
+  each fails loudly in its own step if so.
+
 ## 2026-10-02 — MPI/MFEM: cached MooseConfig.h without conf_vars.mk (PR #10)
 
 - **CI run**: MPI/MFEM run `36992181427`, step `Build Rabbit, stage artifacts, and build wheel`: framework compile dies with `Moose.h:378: fatal error: 'mfem.hpp' file not found`, while every dep cache (PETSc/libMesh/Conduit/WASP/MFEM/MooseConfig) reported `Cache hit`.

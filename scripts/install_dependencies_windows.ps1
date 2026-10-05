@@ -75,6 +75,27 @@ foreach ($tool in $requiredMsysTools) {
 }
 Write-Host "[OK] MSYS2 required tools verified (diff, make, patch, m4, git, python3, cmake)." -ForegroundColor Green
 
+# 1b. MPI variant selection (system MPI = MS-MPI).
+# Serial (default) behaviour is byte-identical when RABBIT_MPI is unset:
+# every MPI difference below is gated on $IsMpi. MPI builds assume a
+# system MPI: headers + MinGW import lib from the MSYS2
+# mingw-w64-x86_64-msmpi package, plus the MS-MPI runtime (mpiexec) on
+# PATH (mpi4py/setup-mpi in CI). No MFEM on Windows; the MPI/MFEM
+# backend is Linux-only.
+$IsMpi = ($env:RABBIT_MPI -eq "1")
+if ($IsMpi) {
+    Write-Host "[*] MPI variant selected (RABBIT_MPI=1): using system MS-MPI." -ForegroundColor Cyan
+    $MsMpiHeader = Join-Path $MsysRoot "mingw64\include\mpi.h"
+    $MsMpiLib = Join-Path $MsysRoot "mingw64\lib\libmsmpi.a"
+    if (-not (Test-Path $MsMpiHeader) -or -not (Test-Path $MsMpiLib)) {
+        throw "Windows MPI build requires system MS-MPI for MinGW (MSYS2 package mingw-w64-x86_64-msmpi provides $MsMpiHeader and $MsMpiLib). Install it and retry."
+    }
+    Write-Host "[OK] System MS-MPI found ($MsMpiHeader)." -ForegroundColor Green
+    if (-not (Get-Command mpiexec.exe -ErrorAction SilentlyContinue)) {
+        Write-Host "[!] mpiexec.exe not on PATH (MS-MPI runtime). Build proceeds; multi-rank runs will fail." -ForegroundColor Yellow
+    }
+}
+
 # 2. Check or create Python virtual environment with uv
 $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
@@ -336,7 +357,19 @@ if ($Stage -in @("all", "petsc")) {
         $applyPetsc = "cd moose/petsc && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/petsc.patch`" || true"
         Invoke-MsysBash $applyPetsc "Applying PETSc Windows patch"
 
-        $petscConfig = "cd moose/petsc && python3 ./configure PETSC_ARCH=arch-windows-opt --with-cc=$RepoRootPosix/.zig_wrappers/zig-cc --with-cxx=$RepoRootPosix/.zig_wrappers/zig-cxx --with-ar=$RepoRootPosix/.zig_wrappers/zig-ar --with-ranlib=$RepoRootPosix/.zig_wrappers/zig-ranlib --with-fc=0 --with-mpi=0 --with-shared-libraries=0 --with-debugging=0 --download-f2cblaslapack=1 --with-windows-graphics=0 --with-x=0 --with-make-np=$Jobs && make PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt all"
+        # MPI builds compile against system MS-MPI (no mpicc wrappers
+        # exist for MS-MPI, so point PETSc at the headers/lib directly)
+        # and download Hypre: the packaged inputs request 'hypre
+        # boomeramg', which the MPI suite exercises without the serial
+        # ILU fallback.
+        if ($IsMpi) {
+            $MpiIncPosix = "$MsysRootPosix/mingw64/include"
+            $MpiLibPosix = "$MsysRootPosix/mingw64/lib/libmsmpi.a"
+            $petscMpiFlags = "--with-mpi=1 --with-mpi-compilers=0 --with-mpi-include=$MpiIncPosix --with-mpi-lib=$MpiLibPosix --download-hypre=1"
+        } else {
+            $petscMpiFlags = "--with-mpi=0"
+        }
+        $petscConfig = "cd moose/petsc && python3 ./configure PETSC_ARCH=arch-windows-opt --with-cc=$RepoRootPosix/.zig_wrappers/zig-cc --with-cxx=$RepoRootPosix/.zig_wrappers/zig-cxx --with-ar=$RepoRootPosix/.zig_wrappers/zig-ar --with-ranlib=$RepoRootPosix/.zig_wrappers/zig-ranlib --with-fc=0 $petscMpiFlags --with-shared-libraries=0 --with-debugging=0 --download-f2cblaslapack=1 --with-windows-graphics=0 --with-x=0 --with-make-np=$Jobs && make PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt all"
         Invoke-MsysBash $petscConfig "Configuring and building PETSc (arch-windows-opt)"
     } else {
         Write-Host "[OK] PETSc already built at $PetscLib" -ForegroundColor Green
@@ -388,7 +421,21 @@ done
         $applyMetis = "cd moose/libmesh/contrib/metis/GKlib && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/metis.patch`" || true"
         Invoke-MsysBash $applyMetis "Applying METIS Windows patch"
 
-        $libmeshBuild = "cd moose/libmesh && export PETSC_DIR=$RepoRootPosix/moose/petsc && export PETSC_ARCH=arch-windows-opt && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --disable-fortran --disable-exodus-fortran PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
+        # MPI builds enable libMesh MPI against the same system MS-MPI
+        # (CPPFLAGS/LDFLAGS since there are no mpicc wrappers) and keep
+        # the PETSc-Hypre requirement: MPI PETSc ships Hypre (see the
+        # --download-hypre flag above), which the MPI suite needs.
+        if ($IsMpi) {
+            $MpiIncPosix = "$MsysRootPosix/mingw64/include"
+            $libmeshMpiEnv = "CPPFLAGS=`"-I$MpiIncPosix`" LDFLAGS=`"-L$MsysRootPosix/mingw64/lib -lmsmpi`" "
+            $libmeshMpiFlags = "--with-mpi"
+            $libmeshHypreFlag = ""
+        } else {
+            $libmeshMpiEnv = ""
+            $libmeshMpiFlags = ""
+            $libmeshHypreFlag = "--disable-petsc-hypre-required"
+        }
+        $libmeshBuild = "cd moose/libmesh && export PETSC_DIR=$RepoRootPosix/moose/petsc && export PETSC_ARCH=arch-windows-opt && $libmeshMpiEnv./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode $libmeshHypreFlag $libmeshMpiFlags --without-gdb-command --disable-fortran --disable-exodus-fortran PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
         Invoke-MsysBash $libmeshBuild "Configuring and building libMesh"
     } else {
         Write-Host "[OK] libMesh already built at $LibMeshLib" -ForegroundColor Green
@@ -478,10 +525,13 @@ if ($Stage -in @("all", "rabbit")) {
         Write-Host "[OK] Staged data files to $DataDest" -ForegroundColor Green
     }
 
-    # The Windows binary is always the serial/SMP variant (PETSc MPIUNI):
-    # record it so the CLI applies serial defaults (e.g. ILU fallback).
-    Set-Content -Path (Join-Path $RepoRoot "src\rabbit\variant.txt") -Value "serial"
-    Write-Host "[OK] Staged variant marker (serial)." -ForegroundColor Green
+    # Record the build variant so the CLI applies the right defaults
+    # (e.g. the serial ILU fallback): "mpi" for system-MS-MPI builds,
+    # "serial" otherwise.
+    $VariantMarker = "serial"
+    if ($IsMpi) { $VariantMarker = "mpi" }
+    Set-Content -Path (Join-Path $RepoRoot "src\rabbit\variant.txt") -Value $VariantMarker
+    Write-Host "[OK] Staged variant marker ($VariantMarker)." -ForegroundColor Green
 }
 
 # 12. Run Verification Tests
