@@ -243,10 +243,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
+          # Whole build tree: the exact CMake log names vary
+          # (CMakeError.log vs CMakeConfigureLog.yaml) and a failed
+          # configure leaves only KBs behind, so capture everything
+          # rather than guessing filenames again.
           name: mpich-build-failure-logs
-          path: |
-            moose/framework/contrib/mfem/build-opt/CMakeFiles/CMakeError.log
-            moose/framework/contrib/mfem/build-opt/CMakeFiles/CMakeOutput.log
+          path: moose/framework/contrib/mfem/build-opt/
           if-no-files-found: ignore
 
   mpich-smoke:
