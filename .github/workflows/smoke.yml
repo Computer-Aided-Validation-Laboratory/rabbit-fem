@@ -137,6 +137,15 @@ jobs:
       - name: "Smoke (linux/macos): Install wheel in clean venv and solve"
         if: inputs.platform != 'windows'
         run: |
+          if [ "${{ inputs.mpi_impl }}" = "mpich" ] && [ -z "${UCX_TLS:-}" ]; then
+            # Ubuntu MPICH is ch4:ucx; UCX probing aborts MPI_Init where
+            # InfiniBand is absent/broken, which fails try_run probes and
+            # every binary invocation depending on runner hardware.
+            # Must precede ALL uses of the binary below (even bare
+            # `rabbit --version`, whose singleton MPI_Init already
+            # aborts). An explicit caller-provided UCX_TLS always wins.
+            export UCX_TLS="tcp,self,sm"
+          fi
           if [ "${{ inputs.platform }}" = "linux" ]; then
             # The wheel links its MPI ecosystem externally by design, so
             # the matching runtime must be present. Only one MPI ships
@@ -194,14 +203,6 @@ jobs:
             MPIRUN_OVERCOMMIT=""
             if [ "${{ inputs.mpi_impl }}" != "mpich" ]; then
               MPIRUN_OVERCOMMIT="--oversubscribe"
-            else
-              # Same IB-free default as the MPICH build env: UCX probing
-              # aborts MPI_Init where InfiniBand is absent/broken, which
-              # fails multi-rank solves depending on runner hardware.
-              # An explicit caller-provided UCX_TLS always wins.
-              if [ -z "${UCX_TLS:-}" ]; then
-                export UCX_TLS="tcp,self,sm"
-              fi
             fi
             INPUT=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType; print(cube_thermomech_input_path(EElemType.HEX8))")
             mkdir -p /tmp/rabbit-smoke-mpi-run && cd /tmp/rabbit-smoke-mpi-run

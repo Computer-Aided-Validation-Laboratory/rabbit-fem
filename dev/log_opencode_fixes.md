@@ -63,6 +63,14 @@
   confirmed no UI interaction) — platform blip. Re-ran each
   smoke job via `gh run rerun --job`: MPI + serial smokes SUCCESS.
   Full board green on `1ac32ab`.
+- Follow-up failure (`37425062119` smoke, same broken-IB runner
+  `runnervm8df0l` as the try_run abort): the `UCX_TLS` export sat
+  inside the `mpi=true` block, but the step's first binary use —
+  bare `rabbit --version` — already performs a singleton
+  `MPI_Init` and aborted (exit 15) before reaching it. Fix:
+  export moved to the top of the smoke step so every invocation
+  on `mpich` legs is covered. Lesson: on MPICH, *any* binary start
+  is an MPI_Init and needs the transport default.
 
 ### Remaining uncertainty / known limitations
 
