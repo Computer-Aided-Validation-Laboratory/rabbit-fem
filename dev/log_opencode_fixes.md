@@ -71,6 +71,9 @@
   export moved to the top of the smoke step so every invocation
   on `mpich` legs is covered. Lesson: on MPICH, *any* binary start
   is an MPI_Init and needs the transport default.
+- Verified: MPICH `37432733736` (c70f190) full SUCCESS (build +
+  smoke incl. rank preflight, --version, singleton, -n 2, MFEM -n 4);
+  whole PR board green (Linux/macOS/Windows/MPI-MFEM/MPICH/Win-MPI).
 
 ### Remaining uncertainty / known limitations
 
