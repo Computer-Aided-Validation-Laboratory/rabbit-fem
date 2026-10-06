@@ -13,6 +13,10 @@ from .common import (
     ensure_serial_mpi_fallback,
     find_python_exe,
     is_mpi_build,
+    mpi_compiler_env,
+    mpi_exec,
+    mpi_fortran_wrapper,
+    mpi_impl,
 )
 
 
@@ -282,10 +286,14 @@ def get_linux_tool_env(
     """Prepare environment variables for building Linux dependencies."""
     tool_env = dict(os.environ)
     if is_mpi_build():
-        tool_env["OMPI_CC"] = str(zigcc_path)
-        tool_env["OMPI_CXX"] = str(zigcxx_path)
-        tool_env["CC"] = "mpicc"
-        tool_env["CXX"] = "mpicxx"
+        tool_env.update(mpi_compiler_env(zigcc_path, zigcxx_path))
+        if mpi_impl() == "mpich":
+            # Ubuntu MPICH is a ch4:ucx build; on machines without
+            # working InfiniBand, UCX probing aborts MPI_Init
+            # (ibv_create_srq failed) which fails CMake try_run
+            # probes and any bare run. Pin IB-free transports unless
+            # the caller already chose (multi-node IB users override).
+            tool_env.setdefault("UCX_TLS", "tcp,self,sm")
     else:
         # Serial/SMP variant: no MPI compiler wrappers anywhere. PETSc
         # falls back to its MPIUNI stubs and libMesh builds serial with
@@ -327,6 +335,17 @@ def build_petsc(
         petsc_env.pop("PETSC_DIR", None)
         petsc_env.pop("PETSC_ARCH", None)
         if is_mpi_build():
+            # PETSc's configure ignores CC/CXX/FX env (it warns and
+            # auto-detects bare `mpicc` instead), so on multi-MPI
+            # machines it silently configures the wrong MPI. Pin the
+            # wrappers as configure args instead, which
+            # update_and_rebuild_petsc.sh forwards to ./configure.
+            mpi_compiler_args = [
+                f"--with-cc={petsc_env['CC']}",
+                f"--with-cxx={petsc_env['CXX']}",
+                f"--with-fc={mpi_fortran_wrapper()}",
+                f"--with-mpiexec={mpi_exec()}",
+            ]
             subprocess.run(
                 [
                     "./scripts/update_and_rebuild_petsc.sh",
@@ -334,6 +353,7 @@ def build_petsc(
                     "--CXXOPTFLAGS=-O3",
                     "--COPTFLAGS=-O3",
                     "--FOPTFLAGS=-O3",
+                    *mpi_compiler_args,
                 ],
                 cwd=str(moose_dir),
                 env=petsc_env,
@@ -527,7 +547,7 @@ def build_mfem(
     # MPI Fortran compiler (plain gfortran leaves MPI_Fortran_* empty
     # and the configure fails). CC/CXX already select the MPI C/C++
     # wrappers via get_linux_tool_env.
-    tool_env["FC"] = "mpif90"
+    tool_env["FC"] = mpi_fortran_wrapper()
     subprocess.run(
         ["./scripts/update_and_rebuild_mfem.sh"],
         cwd=str(moose_dir),

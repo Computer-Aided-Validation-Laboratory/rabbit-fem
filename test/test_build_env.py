@@ -36,12 +36,90 @@ def test_linux_mpi_uses_mpi_wrappers(
 ) -> None:
     """Linux MPI builds compile through mpicc redirected at Zig."""
     monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.delenv("RABBIT_MPI_IMPL", raising=False)
     zigcc, zigcxx = _fake_wrappers(tmp_path)
     env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
     assert env["CC"] == "mpicc"
     assert env["CXX"] == "mpicxx"
     assert env["OMPI_CC"] == str(zigcc)
     assert env["OMPI_CXX"] == str(zigcxx)
+
+
+def test_linux_mpich_uses_suffixed_wrappers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MPICH builds select explicit .mpich wrappers (alternatives-proof)."""
+    from build.common import mpi_fortran_wrapper, mpi_impl
+
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "mpich")
+    assert mpi_impl() == "mpich"
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
+    assert env["CC"] == "mpicc.mpich"
+    assert env["CXX"] == "mpicxx.mpich"
+    assert env["MPICH_CC"] == str(zigcc)
+    assert env["MPICH_CXX"] == str(zigcxx)
+    assert "OMPI_CC" not in env
+    assert "OMPI_CXX" not in env
+    assert mpi_fortran_wrapper() == "mpif90.mpich"
+
+
+def test_linux_mpich_defaults_ucx_without_infiniband(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MPICH builds avoid UCX/IB probing unless the caller opts in.
+
+    Regression protection for the CI failure where MFEM's FindPETSc
+    try_run aborted in MPI_Init (UCX ibv_create_srq failed) on runners
+    without working InfiniBand: Ubuntu MPICH is ch4:ucx, and the probe
+    failure depends on runner hardware.
+    """
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "mpich")
+    monkeypatch.delenv("UCX_TLS", raising=False)
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
+    assert env["UCX_TLS"] == "tcp,self,sm"
+
+
+def test_linux_mpich_respects_caller_ucx_tls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit UCX_TLS (e.g. multi-node IB users) always wins."""
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "mpich")
+    monkeypatch.setenv("UCX_TLS", "ib")
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
+    assert env["UCX_TLS"] == "ib"
+
+
+def test_linux_openmpi_leaves_ucx_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The UCX default is MPICH-only; OpenMPI behavior is untouched."""
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.delenv("RABBIT_MPI_IMPL", raising=False)
+    monkeypatch.delenv("UCX_TLS", raising=False)
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    env = linux_mod.get_linux_tool_env(zigcc, zigcxx)
+    assert "UCX_TLS" not in env
+
+
+def test_mpi_impl_defaults_openmpi_and_rejects_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset impl means OpenMPI; garbage fails early, not deep in CMake."""
+    from build.common import mpi_fortran_wrapper, mpi_impl
+
+    monkeypatch.delenv("RABBIT_MPI_IMPL", raising=False)
+    assert mpi_impl() == "openmpi"
+    monkeypatch.delenv("RABBIT_MPI", raising=False)
+    assert mpi_fortran_wrapper() == "mpif90"
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "bogus-mpi")
+    with pytest.raises(RuntimeError, match="RABBIT_MPI_IMPL"):
+        mpi_impl()
 
 
 def test_linux_serial_bypasses_mpi_wrappers(
@@ -381,3 +459,56 @@ def test_linux_serial_skips_conduit_and_mfem(
         "build_wasp",
         "configure_moose",
     ]
+
+
+def _record_petsc_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
+    """Run build_petsc with everything stubbed; return the script argv."""
+    monkeypatch.setattr(linux_mod, "ensure_moose_repo", lambda *a: None)
+    monkeypatch.setattr(linux_mod, "ensure_moose_submodules", lambda *a: None)
+    monkeypatch.setattr(linux_mod, "check_build_tools", lambda **k: None)
+    recorded: list[str] = []
+
+    def fake_run(
+        cmd: list[str], **kwargs: object
+    ) -> object:
+        recorded.extend(cmd)
+        return None
+
+    monkeypatch.setattr(linux_mod.subprocess, "run", fake_run)
+    zigcc, zigcxx = _fake_wrappers(tmp_path)
+    linux_mod.build_petsc(tmp_path, tmp_path, zigcc, zigcxx)
+    return recorded
+
+
+def test_linux_mpi_pins_mpi_compilers_for_petsc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PETSc must be told its MPI compilers as configure arguments.
+
+    Regression protection: PETSc's configure ignores CC/CXX env (it
+    warns and auto-detects bare ``mpicc``), so on multi-MPI machines
+    the MPI variant silently configured the wrong MPI (libMesh then
+    died with "configured with Open MPI ... non-Open MPI mpi.h").
+    """
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.delenv("RABBIT_MPI_IMPL", raising=False)
+    cmd = _record_petsc_command(tmp_path, monkeypatch)
+    assert "--with-cc=mpicc" in cmd
+    assert "--with-cxx=mpicxx" in cmd
+    assert "--with-fc=mpif90" in cmd
+    assert "--with-mpiexec=mpiexec" in cmd
+
+
+def test_linux_mpich_pins_suffixed_compilers_for_petsc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The MPICH variant pins the explicit .mpich wrappers."""
+    monkeypatch.setenv("RABBIT_MPI", "1")
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "mpich")
+    cmd = _record_petsc_command(tmp_path, monkeypatch)
+    assert "--with-cc=mpicc.mpich" in cmd
+    assert "--with-cxx=mpicxx.mpich" in cmd
+    assert "--with-fc=mpif90.mpich" in cmd
+    assert "--with-mpiexec=mpiexec.mpich" in cmd

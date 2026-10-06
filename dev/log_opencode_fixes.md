@@ -1,5 +1,688 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-06 — Release workflow gains MPICH; MPICH workflow renamed (PR #11)
+
+- Request: publish `rabbit-fem-mpich` from the release workflow and
+  name the MPICH workflows `MPICH/MFEM, Linux:` like the MPI ones.
+- `linux_mpich_build_and_test.yml` top-level `name:` is now
+  `"MPICH/MFEM, Linux: Build Wheel and Test"` (was `"MPICH: ..."`).
+  The name is referenced nowhere else, so nothing else changes; job
+  and artifact names untouched.
+- `release.yml`: new `build-mpich` job mirroring `build-mpi`
+  (MPICH system packages, `RABBIT_MPI`+`RABBIT_MPI_IMPL` env,
+  restore-only caches with keys/paths identical to
+  `linux_mpich_build_and_test.yml` — verified by diff, including
+  Conduit/MFEM/`conf_vars.mk`), new `smoke-mpich` (`mpi: true`,
+  `mpi_impl: mpich`, so it inherits the UCX default and rank
+  preflight), `publish` now needs both and gates on
+  `dist/rabbit_fem_mpich-*.whl` (PEP 427 underscore, same note
+  pattern as the MPI check). The publish step itself already
+  uploads `dist/*`, so the MPICH wheel ships with no further
+  change. PyPI side (trusted-publisher for `rabbit-fem-mpich`) is
+  the user's part.
+- Verification: both files `yaml.safe_load`; every
+  `linux-mpich-*` cache key diffed identical between the two
+  workflows; artifact name `rabbit-fem-mpich-wheel` matches
+  producer/consumer. Not yet run (release only runs on tags /
+  manual dispatch with `dry_run` available).
+
+## 2026-10-05 (CI+local) — MPICH: UCX/IB abort on IB-less runners (PR #11)
+
+- **CI run**: MPICH `37348381898` failed again at `Build MFEM` with
+  the same multipass signature — but the new whole-`build-opt`
+  artifact finally carried `CMakeConfigureLog.yaml`, which shows:
+  compile exitCode 0 (MPICH PETSc links fine with the `--with-cc`
+  pins), run exitCode 15 with `UCX ERROR ibv_create_srq() failed`
+  aborting `MPI_Init_thread` (`MPIDI_UCX_init_world`).
+- **First failure addressed here**: MPICH `Build MFEM` (try_run).
+
+### Root cause (proven from the yaml log + local knob tests)
+
+  Ubuntu MPICH is a `ch4:ucx` build (`mpichversion` confirms). On
+  runners without working InfiniBand, UCX probing hits the dead IB
+  stack and MPICH treats init as fatal instead of falling back — so
+  `MPI_Init` aborts and every `try_run` fails. Runner-dependent:
+  identical code passed MFEM configure on other runners (hence the
+  earlier "flaky" pass). Local knob proof: `UCX_TLS=ib` reproduces a
+  UCX abort here, while the default allowlist runs clean.
+
+### Why the fix addresses the root cause
+
+- `get_linux_tool_env` sets `UCX_TLS=tcp,self,sm` for MPICH builds
+  only (`setdefault`, so a caller-provided value — e.g. multi-node
+  IB users — always wins). `sm`/`self` cover same-node traffic
+  (all CI ranks share a runner); `tcp` keeps single-listener
+  setups working; `ib` is never probed so the abort cannot fire.
+  OpenMPI never sees the variable (it can use UCX itself, so it
+  must not be constrained).
+- `smoke.yml` exports the same default for `mpich` legs only, so
+  solves are as IB-independent as the build probes.
+- Tests: default/override/absent-for-openmpi pinned in
+  `test_build_env.py`.
+
+### Silent-singleton hole found while verifying (same push)
+
+  While proving the knob, local `mpiexec.mpich -n 2` runs showed
+  every rank reporting `0/1`: hydra can fail its PMI handshake and
+  fall back to singletons with exit 0, which hollows out `-n N`
+  proofs (outputs still appear). Added an MPICH-only preflight to
+  `smoke.yml` asserting 4 distinct `$PMI_RANK`s before the solves.
+  (This laptop's own hydra/PMI handshake is broken in a way that
+  also defeats the local `-n 4` demo — same silent singletons, so
+  the local multi-rank proof below is reported honestly as
+  inconclusive; CI smoke is the real multi-rank gate.)
+
+### Files changed
+
+- `scripts/build/linux.py` (`UCX_TLS` default), `scripts/build/common.py`
+  (`mpi_exec()`), `test/test_build_env.py`, `.github/workflows/smoke.yml`.
+
+### Verification
+
+- Local: 49 tests pass; `UCX_TLS=ib` force-fails, default runs.
+- CI: MPICH build `37356896430` SUCCESS with the default (MFEM
+  try_run passes deterministically now); MPICH smoke re-run
+  SUCCESS — the PMI rank preflight passes on healthy runners
+  (no false positive) and every solve converges.
+- Incident 21:0xZ: the three Linux py-3.13 smokes flipped to
+  `cancelled` with no new push and no author action (user
+  confirmed no UI interaction) — platform blip. Re-ran each
+  smoke job via `gh run rerun --job`: MPI + serial smokes SUCCESS.
+  Full board green on `1ac32ab`.
+- Follow-up failure (`37425062119` smoke, same broken-IB runner
+  `runnervm8df0l` as the try_run abort): the `UCX_TLS` export sat
+  inside the `mpi=true` block, but the step's first binary use —
+  bare `rabbit --version` — already performs a singleton
+  `MPI_Init` and aborted (exit 15) before reaching it. Fix:
+  export moved to the top of the smoke step so every invocation
+  on `mpich` legs is covered. Lesson: on MPICH, *any* binary start
+  is an MPI_Init and needs the transport default.
+- Verified: MPICH `37432733736` (c70f190) full SUCCESS (build +
+  smoke incl. rank preflight, --version, singleton, -n 2, MFEM -n 4);
+  whole PR board green (Linux/macOS/Windows/MPI-MFEM/MPICH/Win-MPI).
+
+### Remaining uncertainty / known limitations
+
+- End-user wheels: `rabbit-fem-mpich` on IB-less hardware needs the
+  same `UCX_TLS` treatment at *run* time (document, or set a
+  fallback in the CLI — deliberately left out of this change).
+- Legacy `CMakeError.log` does not exist under CMake 3.31 (yaml log
+  instead) — the whole-tree artifact already accounts for this.
+
+## 2026-10-05 (local) — Linux MPI: pin PETSc compilers, configure ignores CC env
+
+- **Local run**: MPICH wheel build on Ubuntu noble with both OpenMPI
+  (default `mpicc`) and MPICH installed. `build_petsc` completed but
+  libMesh died with `petscsys.h: "PETSc was configured with Open MPI
+  but now appears to be compiling using a non-Open MPI mpi.h"`.
+- **First failure addressed here**: local `Build libMesh`.
+
+### Root cause (proven from logs)
+
+  PETSc's `./configure` **ignores `CC`/`CXX` env** (`Found
+  environment variable: CC=mpicc.mpich. Ignoring it!`) and
+  auto-detects bare `mpicc`, which resolves via update-alternatives
+  to whatever MPI is default (OpenMPI here). `get_linux_tool_env`
+  only sets env, so on multi-MPI machines the MPI variant silently
+  builds the wrong-MPI PETSc; downstream MPICH compiles then fail
+  the vendor check. CI never caught it: each runner has exactly one
+  MPI, so auto-detect accidentally agrees there.
+
+### Why the fix addresses the root cause
+
+- `build_petsc` (MPI branch) now passes
+  `--with-cc=<CC> --with-cxx=<CXX> --with-fc=<fortran wrapper>`
+  (values from the existing `mpi_compiler_env`/`mpi_fortran_wrapper`
+  mapping: `mpicc`/`mpicxx`/`mpif90` vs `.mpich` suffixed), which
+  `update_and_rebuild_petsc.sh` forwards to `./configure` as
+  documented configure arguments. Deterministic on any machine;
+  single-MPI CI behavior unchanged (same effective compilers).
+- Regression tests pin both impl spellings in the recorded script
+  argv (`test_build_env.py`).
+- Local note: switching impls in one tree needs manual cleaning
+  (`arch-moose`, `libmesh/installed`, MOOSE config, `make clobber`
+  for framework/modules/app) — readiness checks cannot tell
+  OpenMPI outputs from MPICH ones. CI is immune (per-impl caches).
+
+### Files changed
+
+- `scripts/build/linux.py`, `test/test_build_env.py`.
+
+### Verification
+
+- Local: 23 `test_build_env.py` pass; full local MPICH rebuild in
+  progress (this run), then wheel + `mpiexec.mpich -n 4` MFEM
+  `curlcurl.i` smoke.
+- CI: `0d3e6e1` exercises the new args on both MPI legs.
+- Follow-up fix in `93f2fab`: same run then died in PETSc configure
+  with `Your libraries are from MPICH but it appears your mpiexec is
+  from Open MPI` — bare `mpiexec` resolves to OpenMPI on multi-MPI
+  machines. Added `mpi_exec()` (`mpiexec` vs `mpiexec.mpich`) and
+  `--with-mpiexec=` to the same arg list (+ test assertions).
+- Local end-to-end (this machine): full MPICH stack built, wheel
+  `rabbit_fem_mpich-2026.9.7` (88.8 MB), 118 pytest pass
+  (after force-reinstalling venv-rotted `numpy`/`netCDF4` — local
+  env only, no repo change), clean-venv wheel install OK, MFEM
+  `curlcurl.i` singleton OK, `mpiexec.mpich -n 4` converged
+  (GMRES 7 iters, 4.5e-13) with CSV outputs.
+
+## 2026-10-05 — PR #11 verification: all legs green (closing note)
+
+- Windows MPI `37326982065` (59a1187) SUCCESS 1h38m and `37330714164`
+  (e4c12e1) SUCCESS 1h21m, both incl. `mpiexec -n 2` HEX8 proof —
+  closes the Hypre `.obj`, `mpi.h`, and `-lmsmpi.dll` items above.
+- MPICH `37330715155` (e4c12e1) SUCCESS, build + clean-machine smoke
+  incl. `MFEM MPI smoke solve OK` — closes the `libmpich` staging
+  and `OutputData` race items. (The earlier MPICH MFEM multipass
+  failures never recurred after the first pass and were never
+  root-caused; if they return, the whole-`build-opt` artifact from
+  `fdf9428` will carry the evidence.)
+- MPI/MFEM Linux green ×4 (incl. `--oversubscribe` smoke proofs);
+  serial Linux/macOS/Windows green throughout (compartmentalisation
+  held — no serial/macOS leg broke at any point).
+
+## 2026-10-05 — MPICH smoke: multi-rank `mkdir OutputData` race (PR #11)
+
+- **CI run**: MPICH `37326982337` — the MPICH **build** went fully
+  green (PETSc/libMesh/Conduit/WASP/MFEM/MOOSE/Rabbit, wheel staged
+  with the `libmpich` fix, test suite passed). First-ever MPICH
+  smoke run failed at the MFEM `-n 4` proof: the solve itself
+  converged (GMRES 7 iters, 4.5e-13) but every rank aborted with
+  `Could not create directory: OutputData for file base:
+  OutputData/CurlCurl/curlcurl` (`curlcurl.i:143`, CSV output).
+- **First failure addressed here**: MPICH smoke MFEM-MPI leg.
+
+### Root cause
+
+  All 4 ranks enter the CSV output with a missing `OutputData/`
+  directory and race `mkdir`; the losers treat `EEXIST` as fatal.
+  Launcher timing decides: three OpenMPI `-n 4` runs serialized past
+  it, MPICH started all ranks together and collided. Nothing about
+  the wheel, the build, or MPI correctness — purely a test-working-
+  directory setup gap (singleton and `-n 2` flat-file legs can never
+  hit it: no subdirectory creation involved).
+
+### Why the fix addresses the root cause
+
+- `smoke.yml` runs `mkdir -p OutputData/CurlCurl` serially before
+  the `-n 4` invocation. A pre-existing directory is never created,
+  so no rank can race — deterministic under any launcher, and
+  `mkdir -p` is idempotent. Scoped to the one step that writes into
+  a subdirectory; OpenMPI behavior unchanged (its runs also just
+  see an existing dir).
+
+### Platform-specific considerations
+
+- POSIX-shell smoke step (Linux/macOS legs); Windows smoke has no
+  MPI multi-rank proof. No product code touched.
+
+### Files changed
+
+- `.github/workflows/smoke.yml` (`mkdir -p OutputData/CurlCurl`).
+- `dev/log_opencode_fixes.md`.
+
+### How to verify
+
+- CI: next MPICH smoke run should print `MFEM MPI smoke solve OK`.
+- Shell logic is `mkdir -p` (cannot fail when present) + unchanged
+  `mpirun` line; no local MPI launcher needed to review it.
+
+### Remaining uncertainty
+
+- None on this item. (Upstream MOOSE could make the Outputs mkdir
+  `EEXIST`-tolerant, but that is out of scope for this repo.)
+
+## 2026-10-05 — Windows MPI libMesh: `-lmsmpi` cannot resolve the import lib (PR #11)
+
+- **CI run**: Windows MPI `37322675178` — `Build PETSc` now passes
+  (the zig `-o <stem>.o` + `RABBIT_MPI_INCLUDE` fixes work: PETSc
+  linklibs show `-lHYPRE ... -lmsmpi.dll`, Hypre built with MPI).
+  New gate: `Build libMesh` fails at
+  `checking for x86_64-w64-mingw32-mpicc... <zig-cc>` then
+  `C compiler cannot create executables`.
+- **First failure addressed here**: Windows MPI `Build libMesh`.
+
+### Root cause (proven locally, not assumed)
+
+  `libmeshMpiEnv` set `LDFLAGS="-L.../mingw64/lib -lmsmpi"`, but the
+  only import lib on disk is `libmsmpi.dll.a` (established in
+  `99d860f`; the MPI package ships no `libmsmpi.a`). Verified with
+  zig 0.16.0 + a scratch `libbaz.dll.a`: bare `-lbaz` searches
+  `baz.dll`, `baz.lib`, `libbaz.a` and fails, while `-lbaz.dll`
+  resolves `libbaz.dll.a` and links. So the libMesh compiler
+  self-test (compile+link a trivial program with the MPI LDFLAGS)
+  could never link. Same spelling PETSc uses successfully
+  (`-lmsmpi.dll`, visible in its recorded linklibs).
+
+### Why the fix addresses the root cause
+
+- One-word change: `-lmsmpi` -> `-lmsmpi.dll` in `libmeshMpiEnv`.
+  Serial branch untouched; no other `-lmsmpi` spellings exist in
+  the script. Also added `moose/libmesh/config.log` to the
+  `windows-mpi-build-failure-logs` artifact so the next frontier
+  (WASP/MOOSE/Rabbit) is diagnosable the same way.
+
+### Platform-specific considerations
+
+- Windows-MPI-only lines (`$IsMpi` branch + MPI workflow artifact);
+  serial Windows/Linux/macOS untouched.
+
+### Files changed
+
+- `scripts/install_dependencies_windows.ps1` (`-lmsmpi.dll`).
+- `.github/workflows/windows_mpi_build_and_test.yml`
+  (`moose/libmesh/config.log` in failure logs).
+- `dev/log_opencode_fixes.md`.
+
+### How to verify
+
+- Local: scratch import-lib link test above (`-lbaz` fails,
+  `-lbaz.dll` links).
+- CI: next Windows MPI round should pass `Build libMesh` configure
+  (watch for `C compiler works... yes` past the mpicc probe).
+
+### Remaining uncertainty
+
+- None on this item. Next frontier on this leg: WASP/MOOSE/Rabbit
+  stages (unreached so far).
+
+## 2026-10-05 — Windows MPI Hypre: zig `.obj` default + invisible `mpi.h` (PR #11)
+
+- **CI runs**: Windows MPI `37294305947`, `37309458638`, `37312695933`
+  — identical `Build PETSc` failure in Hypre `make`:
+  `ar: error: F90_HYPRE_error.o: No such file or directory` with zero
+  compiler diagnostics. `37312695933` carried the new Hypre
+  `src/config.log` (uploaded since `27f0041`), which broke the case
+  open.
+- **First failure addressed here**: Windows MPI `Build PETSc`.
+
+### Root cause (proven, not assumed)
+
+1. `zig cc -target x86_64-windows-gnu -c foo.c` (zig 0.16.0) writes
+  `foo.obj` by default — reproduced locally (absolute- and
+  relative-path compiles both emit `foo.obj`, never `foo.o`).
+  Hypre's `src/utilities` rules compile without `-o` but list
+  `*.o` in `OBJS`/the `ar` line (only the newer device files carry
+  explicit `-o *.obj`, which is why they were fine). `make` trusts
+  the exit code 0, proceeds to `ar`, which fails on the missing
+  `.o` files. Consistent with every observation: silent compiles,
+  mixed `.o`/`.obj` archive line, and autoconf itself reporting
+  `checking for suffix of object files... obj`. Serial PETSc is
+  unaffected (no Hypre download); Linux is unaffected (zig there
+  emits `.o`).
+2. Hypre's `configure` probes (`mpi.h`, `MPI_Comm_f2c`) run with plain
+  `CFLAGS` — the conftest line in `src/config.log` has no
+  `-I/c/msys64/mingw64/include` — so PETSc's `--with-mpi-include`
+  never reaches them (`fatal error: 'mpi.h' file not found`) and the
+  download silently builds serial `mpistubs`, which would cripple the
+  parallel `hypre boomeramg` path the MPI suite exists to exercise.
+
+### Why the fix addresses the root cause
+
+- `ensure_default_object_output()` in
+  `scripts/windows_wrappers/wrapper_utils.py`, called from both
+  `cc_wrapper.transform_args` and `cxx_wrapper.transform_args`:
+  bare `-c` with exactly one source and no `-o` gains
+  `-o <stem>.o` (cwd, matching `cc -c dir/foo.c` writing `./foo.o`).
+  Restores the POSIX convention such Makefiles assume; explicit
+  `-o`, link lines, `-E/-S/-M` modes, and multi-source `-c` are
+  untouched. Verified end to end through the real wrapper + zig:
+  bare `-c foo.c` now emits `foo.o`.
+- `mpi_include_args()` (same file): appends `-I` from
+  `RABBIT_MPI_INCLUDE` (MSYS form, converted to a Windows path in
+  the wrapper, so no env-splitting hazard). `ps1` sets it to the
+  MS-MPI include dir for MPI PETSc configures only; serial builds
+  never set it and behave byte-identically. `CPATH` was considered
+  and rejected (Windows `;` vs POSIX `:` splitting of `C:/...`
+  values); `CPPFLAGS`-via-passthrough was rejected (unverifiable
+  quoting through ps1->bash->PETSc->Hypre layers).
+- `test/test_windows_wrappers.py`: 13 tests (default `-o`, explicit
+  `-o` forms, link/preprocess/multi-source/header passthrough,
+  basename derivation, both wrappers end to end, env set/unset).
+
+### MPICH MFEM `FindPETSc` failure: still under diagnosis
+
+- MPICH `37309459303` (with the `libmpich` staging fix) and
+  `37312696317` both fail at step 21 `Build MFEM`, **not** staging —
+  the staging fix is verified effective (build reaches MFEM).
+  `FindPETSc.cmake` multipass `petsc_works_*` try_run fails
+  (`missing: PETSC_EXECUTABLE_RUNS`). Compile-vs-run is not yet
+  distinguishable from the job log; `CMakeError.log` was never
+  uploaded. No code change made (no speculation).
+- Diagnostic-only change here: `linux_mpich_build_and_test.yml`
+  gains an `MPICH: Upload build failure logs` step
+  (`build-opt/CMakeFiles/CMakeError.log` + `CMakeOutput.log`,
+  `if-no-files-found: ignore`), mirroring the windows-mpi pattern.
+- Open question for the next watch tick: MPI/MFEM build
+  `111771741952` (same push) is still running. If it fails
+  identically at MFEM, the cause is shared (fresh full-rebuild
+  PETSc after the `common.py` cache-key change) rather than
+  MPICH-specific — investigate the PETSc build next, not MPICH.
+
+### Platform-specific considerations
+
+- Wrappers run only on Windows (`install_dependencies_windows.ps1`
+  toolchain); Linux/macOS compilers untouched. Serial Windows
+  unaffected (env unset; `-o` derivation only changes commands that
+  previously produced wrongly-named outputs).
+- No hardcoded paths/users/drives: include dir derived from
+  `$MsysRoot` at runtime; `.o` name derived from the source operand.
+- MPICH workflow change is artifact-upload only.
+
+### Files changed
+
+- `scripts/windows_wrappers/wrapper_utils.py` (two helpers).
+- `scripts/windows_wrappers/cc_wrapper.py`,
+  `scripts/windows_wrappers/cxx_wrapper.py` (call sites).
+- `scripts/install_dependencies_windows.ps1`
+  (`$env:RABBIT_MPI_INCLUDE` for MPI PETSc stage).
+- `test/test_windows_wrappers.py` (new, 13 tests).
+- `.github/workflows/linux_mpich_build_and_test.yml` (failure logs).
+
+### How to verify
+
+- Local: `pytest test/test_windows_wrappers.py
+  test/test_staging.py test/test_build_env.py` → 44 passed; wrapper
+  e2e via real zig emits `foo.o`.
+- CI: next Windows MPI round should pass Hypre `make` (watch for
+  `libHYPRE_utilities.a` building, then `mpi.h... yes` in a future
+  `config.log`); next MPICH round uploads `CMakeError.log`.
+
+### Remaining uncertainty
+
+- Whether Hypre's `MPI_Comm_f2c` link probe (needs `-L/-l`, still
+  absent from conftests) matters with `--disable-fortran` — likely
+  benign, flagged for the next log read.
+- MPICH MFEM compile-vs-run (pending `CMakeError.log` + the
+  MPI/MFEM-leg verdict).
+- Follow-up: literal `CMakeError.log`/`CMakeOutput.log` artifact
+  paths found nothing (`fdf9428` broadens the upload to the whole
+  `build-opt/` tree — the legacy names may not exist under CMake
+  3.31's configure log). MPI-leg `37312696366` went fully green,
+  including a fresh full-rebuild MFEM configure, so the MPICH
+  multipass failure is MPICH-specific, not shared PETSc staleness.
+
+## 2026-10-05 — MPICH staging (libmpich external) + MPI smoke --oversubscribe + windows-mpi setup-msys2 input (PR #11)
+
+- **CI runs** (all PR #11, push `a76b3c0`, ~10:05 UTC): Windows MPI
+  `37294305947` (`Build PETSc` fails in Hypre `make`), MPICH
+  `37294306393` (`Build Rabbit...` fails in `stage_artifacts`), MPI/MFEM
+  `37294306356` (build green, `MPI: Clean-machine smoke test`
+  `111729704202` fails at `mpirun -n 4`).
+- **First failure addressed here**: MPICH `37294306393` staging abort
+  and MPI smoke slot refusal (both root-caused from logs); plus the
+  `msys2-location` warning on the Windows MPI job. The Windows Hypre
+  `make` failure is diagnosed below but deliberately left unpatched
+  (no speculative changes; needs build-tree evidence).
+
+### Root cause 1 (MPICH): MPI-ecosystem libs not excluded from staging
+
+`stage_artifacts` (`scripts/build/common.py::find_needed_libraries`)
+  treats `DT_NEEDED` entries as system-external only by prefix
+  (`libmpi.so`, `libmpi_cxx.so`, `libopen-pal.so`, ... — the OpenMPI
+  ecosystem, left external by design with the runtime installed in
+  smoke). MPICH SONAMEs (`libmpich.so.12`, `libmpichcxx.so.12`,
+  `libmpichfort.so.12`, from Ubuntu `libmpich12` in
+  `/usr/lib/x86_64-linux-gnu`) match none of those prefixes, so they
+  fall through to `available_libs` lookup (repo/moose trees + ELF
+  RPATH + OpenMP index), miss everywhere, and raise
+  `FileNotFoundError: ... required shared libraries were not found`.
+  Companion defect: the patchelf RPATH hardcodes the OpenMPI dir
+  (`/usr/lib/x86_64-linux-gnu/openmpi/lib`) for every Linux wheel,
+  which is a nonexistent path on MPICH runners.
+
+### Why the fix addresses root cause 1
+
+- `"libmpich"` added to `system_prefixes`: MPICH runtime stays
+  external exactly like OpenMPI (smoke already installs `mpich` when
+  `mpi_impl == mpich`), so staging no longer demands a vendored copy.
+  Prefix form covers `.so.12`/`cxx`/`fort` variants without hardcoding
+  versions or absolute paths.
+- `stage_artifacts` RPATH is now MPI-aware: MPICH wheels get only the
+  relocatable `$ORIGIN` entries (MPICH libs resolve via the default
+  loader path); serial and OpenMPI RPATHs are byte-identical to
+  before. Serial never calls `mpi_impl()` (short-circuit), Windows
+  (`win32`) takes the same `else` branch as before since its
+  `RABBIT_MPI_IMPL` defaults to `openmpi`.
+
+### Root cause 2 (MPI smoke): OpenMPI slot refusal on small runners
+
+  `mpirun -n 4` for the MFEM multi-rank proof fails with "There are not
+  enough slots available" (2-slot runners). The `-n 2` leg passed only
+  incidentally. OpenMPI's documented remedy is `--oversubscribe`;
+  MPICH's `mpirun` has no such flag (it oversubscribes by default), so
+  a blanket flag would break the MPICH leg.
+
+### Why the fix addresses root cause 2
+
+- `smoke.yml` sets `MPIRUN_OVERCOMMIT=--oversubscribe` unless
+  `mpi_impl == mpich` (empty otherwise), applied to both `-n 2` and
+  `-n 4` invocations. Serial legs never enter the branch; MPICH
+  commands render identically to before. No sleeps/retries; the flag
+  is the documented slot policy, not a workaround.
+
+### Root cause 3 (Windows MPI workflow): invalid setup-msys2 input
+
+  Job annotations on every Windows MPI run: `Unexpected input(s)
+  'msys2-location'` (valid: `location`, ...). The action ignores the
+  unknown key and provisions a throwaway MSYS2, while `ps1` builds in
+  the image tree — wasteful and confusing. One-word fix to the
+  documented input, MPI workflow only (serial green build untouched).
+
+### Windows Hypre make failure: diagnosis, no patch yet
+
+- Evidence from the uploaded `configure.log` (`37294305947`): Hypre
+  `configure` ran with our explicit `--host=x86_64-w64-mingw32` and
+  reports `checking for suffix of object files... obj` plus
+  `checking for mpi.h... no` / `checking for MPI_Comm_f2c... no`,
+  then `make -j4` compiles `src/utilities` (echoed `zig-cc ... -c
+  F90_HYPRE_error.c` lines, no compiler diagnostics) and dies at
+  `zig-ar cr libHYPRE_utilities.a F90_HYPRE_error.o ...` with
+  `ar: error: F90_HYPRE_error.o: No such file or directory`.
+- What this rules out: the `--host` fix worked (configure completes);
+  serial PETSc (no Hypre) is unaffected. What is still unknown: why
+  `mpi.h` was not found despite `-I/c/msys64/mingw64/include`
+  (header installed by the same script into the same `$MsysRoot`
+  tree), and why zero-object compiles return success (OBJEXT=`obj`
+  vs `zig cc -target x86_64-windows-gnu` default `.o` mismatch is one
+  hypothesis; swallowed diagnostics is another). Hypre's own
+  `config.log` (in `externalpackages/git.hypre/src/`) is not in the
+  failure artifact, so the conftest failure reason is not observable.
+- Next step (next watch tick): extend the `Upload build failure logs`
+  step with `moose/petsc/arch-windows-opt/externalpackages/git.hypre/src/config.log`
+  (and keep the change diagnostic-only), then root-cause from real
+  evidence. No build-behavior change made here.
+
+### Platform-specific considerations
+
+- `common.py`: Linux ELF path only in effect; `darwin` branch and
+  `win32` outcome unchanged (verified by branch analysis above).
+- `smoke.yml`: shell/POSIX only; Windows smoke steps untouched.
+- `windows_mpi_build_and_test.yml`: single key rename; serial
+  `windows_build_and_test.yml` deliberately untouched while green.
+- No hardcoded paths/users/drives: MPICH match is a SONAME prefix,
+  RPATH uses `$ORIGIN`/documented system dir, smoke branches on the
+  existing `mpi_impl` input.
+
+### Files changed
+
+- `scripts/build/common.py` (`system_prefixes` + MPI-aware RPATH).
+- `test/test_staging.py` (new `test_mpich_libs_treated_as_system` +
+  `readelf` fake).
+- `.github/workflows/smoke.yml` (`MPIRUN_OVERCOMMIT`).
+- `.github/workflows/windows_mpi_build_and_test.yml`
+  (`msys2-location` -> `location`).
+
+### How to verify
+
+- Local: `.venv/bin/python -m pytest test/test_staging.py
+  test/test_build_env.py` → 31 passed (incl. the new MPICH test).
+- YAML: both edited workflows parse (`yaml.safe_load`).
+- CI: next MPICH round should pass `stage_artifacts` to wheel
+  packaging; next MPI smoke should pass the `-n 4` MFEM proof;
+  Windows MPI should lose the `msys2-location` annotation (Hypre
+  `make` still expected to fail until root-caused).
+
+### Remaining uncertainty
+
+- Windows Hypre `make` (see above): no patch until `config.log`
+  evidence. If the `mpi.h` miss is a two-tree artifact, the
+  `location` fix here may already change its presentation — the next
+  log will tell.
+- Follow-up (pushed after seeing `37309458638` fail identically):
+  `windows-mpi-build-failure-logs` now also uploads
+  `externalpackages/git.hypre/src/config.log` (diagnostic-only, still
+  `if-no-files-found: ignore`), so the next round carries the
+  `mpi.h... no` conftest reason. `location` fix confirmed effective —
+  the `msys2-location` annotation is gone on the new run.
+
+## 2026-10-05 — Windows MPI: explicit --host for Hypre download (PR #11)
+
+- **CI run**: Windows MPI `37290786009`, `Build PETSc` failed after
+  ~11 min: `Error running configure on HYPRE`. MPI detection itself
+  passed (configure reached the download stage).
+- **Root cause**: Hypre's autotools `config.guess` cannot determine the
+  MSYS host (`checking host system type...` empty, then `configure:
+  error: invalid value of canonical host`). PETSc forwards toolchain
+  variables but no host, so the download configure dies before
+  compiling anything.
+- **Fix**: `--download-hypre-configure-arguments=--host=x86_64-w64-mingw32`
+  on the MPI PETSc flags (PETSc's documented per-download passthrough;
+  verified to exist in-tree at `config/package.py:1780`). Explicit and
+  correct: the whole toolchain already targets `x86_64-w64-mingw32`
+  (libMesh `--host` uses the same value). Serial flags untouched.
+- **Files changed**:
+  `scripts/install_dependencies_windows.ps1`,
+  `dev/log_opencode_fixes.md`.
+- **Verification**: no unit-test surface (ps1 flag string); live proof
+  is the next Windows MPI round (Hypre configure proceeds to compile).
+- **Remaining uncertainty**: Hypre compile/link under zig-cc wrappers
+  (next stage decides, fails loudly if not).
+
+## 2026-10-05 — Windows serial: MSYS2 mirror 429s + Windows MPI: libmsmpi.dll.a (PR #11)
+
+- **CI runs**: serial `37287530177` failed in `Build WASP and HIT`
+  setup (`C:\msys64\usr\bin\python3.exe` not recognized); MPI
+  `37287529425` failed in `Build PETSc` at the MS-MPI preflight despite
+  a successful pacman install.
+- **Root cause (serial, external flake)**: MSYS2 mirrors returned HTTP
+  429 (rate-limit) mid-transaction (`failed retrieving file ...
+  error: 429`, `failed to commit transaction`), so python3 never
+  installed. Nothing wrong with our code or caches — the MPI run's
+  identical transaction minutes later succeeded. Genuinely externally
+  flaky (the one case retries are for), same justification as the
+  existing submodule-clone retries.
+- **Fix (serial)**: bounded retry (5x30s) around the MSYS2 tool-ensure
+  pacman call; the existing missing-tool verification stays the
+  fail-loud gate. Retry triggers only on non-zero pacman exit, so green
+  runs are byte-identical.
+- **Root cause (MPI, our filename bug)**: the package file list
+  (packages.msys2.org) shows the import lib is
+  `/mingw64/lib/libmsmpi.dll.a`, not `libmsmpi.a` — headers were right,
+  the lib name was assumed. (Bonus from the same listing: the package
+  ships real `mpicc/mpicxx/mpif90.exe` wrappers; deliberately not
+  switching to them — the zig toolchain stays single-owner for all
+  compiles.)
+- **Fix (MPI)**: corrected lib filename in the preflight and the PETSc
+  `--with-mpi-lib` flag (`-lmsmpi` was already correct and unchanged).
+- **Files changed**:
+  `scripts/install_dependencies_windows.ps1`,
+  `dev/log_opencode_fixes.md`.
+- **Verification**: 83 unit tests pass. Live proof is the next round of
+  both Windows legs.
+- **Remaining uncertainty**: mirror 429 recurrence rate (retry covers
+  it); PETSc acceptance of the corrected lib path.
+
+## 2026-10-05 — rabbit-fem-mpich variant + 3.9 floor legs removed (PR #11)
+
+- **Scope**: `rabbit-fem-mpich` mirrors the OpenMPI/MFEM stack
+  (PETSc/libMesh/Conduit/WASP/MFEM, `--with-mfem`) on the MPICH
+  toolchain. Audit showed MOOSE's installer scripts are MPI-generic
+  (no OpenMPI assumptions), so the variant is small by construction:
+  `RABBIT_MPI_IMPL=mpich` selects explicit `mpicc.mpich`/`mpicxx.mpich`/
+  `mpif90.mpich` wrappers (Debian suffix convention, verified against
+  this box's `.openmpi` suffixes — immune to update-alternatives
+  state) with `MPICH_CC/CXX` pointing at the zig wrappers; garbage
+  values fail early. Wheel publishes as `rabbit-fem-mpich` (own PyPI
+  project, user-owned at release); `variant.txt` stays `mpi` (the CLI
+  is impl-agnostic; `PMI_SIZE` detection already covers MPICH).
+- **Isolation**: all caches carry `-mpich` keys; serial and OpenMPI
+  stacks untouched (default impl is openmpi; serial never consults it).
+  Smoke gains an `mpi_impl` input (default openmpi, so all existing
+  callers are byte-identical) selecting the runtime package per leg.
+- **Floor removal**: the three `*-floor` jobs (3.9 negative legs)
+  deleted per request — the `src` guard + `requires-python` floor +
+  `test_python_floor.py` stay as product behavior.
+- **Files changed**: `scripts/build/{common,linux}.py`,
+  `test/test_build_env.py` (impl switch tests),
+  `.github/workflows/linux_mpich_build_and_test.yml` (new),
+  `.github/workflows/smoke.yml` (`mpi_impl`),
+  `.github/workflows/{linux,macos,windows}_build_and_test.yml`
+  (floor legs removed), `dev/log_opencode_fixes.md`.
+- **Verification**: all 8 workflow YAMLs parse; 52 unit tests pass.
+  Live proof is PR #11 CI (cold `-mpich` dep caches expected).
+- **Remaining uncertainty**: MOOSE PETSc script acceptance of the
+  mpich wrappers, MPICH runtime weight — first CI round decides.
+
+## 2026-10-05 — Windows MPI: MS-MPI landed in the wrong MSYS2 tree (PR #11)
+
+- **CI run**: Windows MPI `37280476119`, step `Build PETSc` failed in
+  ~3 min in my own preflight: `requires system MS-MPI ...
+  C:\msys64\mingw64\include\mpi.h`. MSYS2 setup + MS-MPI install steps
+  were all green.
+- **Root cause**: two MSYS2 trees on the runner. The setup action
+  installed `mingw-w64-x86_64-msmpi` into its temp tree
+  (`D:\a\_temp\setup-msys2\msys64` — proven: `installing
+  mingw-w64-x86_64-msmpi...` in its log), but the ps1 builds with the
+  detected `$MsysRoot` (image install `C:\msys64`), which never got the
+  package. A workflow package list can only feed the action's tree, so
+  it can never satisfy a build rooted elsewhere.
+- **Fix**: single owner — the ps1 installs `mingw-w64-x86_64-msmpi`
+  itself into `$MsysRoot` when the header/lib are absent (same ensure
+  pattern as the existing tool installs, exit code checked loudly),
+  keeping the fail-early throw when still absent. Removed the package
+  from the workflow install list (dead weight feeding the wrong tree).
+  Serial paths untouched (block is `$IsMpi`-gated; pre-existing silent
+  pacman behaviour left as-is).
+- **Files changed**:
+  `scripts/install_dependencies_windows.ps1`,
+  `.github/workflows/windows_mpi_build_and_test.yml`,
+  `dev/log_opencode_fixes.md`.
+- **Verification**: workflow YAML parses; 81 unit tests pass (+3
+  skips; sim/gold need a built binary). Live proof is the next Windows
+  MPI round (ps1 installs msmpi into `C:\msys64`, PETSc configure runs).
+- **Remaining uncertainty**: pacman weight on the image tree; PETSc
+  acceptance of the flags — the next round decides.
+
+## 2026-10-05 — Windows MPI first go (branch windows-mpi, PR #11)
+
+- **Scope**: initial Windows MPI variant assuming system MPI (MS-MPI), no
+  MFEM (the MPI/MFEM backend stays Linux-only). New `windows_mpi_...`
+  workflow: own `windows-mpi-*` cache keys (never shares state with the
+  serial Windows stack), MS-MPI via `mpi4py/setup-mpi@v1` (SDK+runtime,
+  `mpiexec` on PATH) plus MinGW import lib/headers via
+  `mingw-w64-x86_64-msmpi` (the zig toolchain targets
+  `x86_64-windows-gnu`, so the MinGW `.a` links cleanly — no
+  space-in-path MSVC `.lib` quoting games). `ps1` changes are strictly
+  gated on `$IsMpi = ($env:RABBIT_MPI -eq "1")`: PETSc
+  `--with-mpi=1 --with-mpi-compilers=0` + explicit include/lib (MS-MPI
+  ships no mpicc wrappers) + `--download-hypre=1` (MPI suite runs
+  without the serial ILU fallback); libMesh `--with-mpi` via
+  CPPFLAGS/LDFLAGS with the Hypre requirement kept; `variant.txt`
+  `mpi` vs `serial`. Serial expansions verified identical (only
+  whitespace delta). Test suite + `mpiexec -n 2` HEX8 proof; no
+  compat/floor/mamba/smoke legs until the build is green.
+- **CI cost note**: `scripts/**` is in the serial Windows wheel+dep
+  keys, so serial cold-rebuilds once (standard file-granular cost).
+- **Files changed**: `scripts/install_dependencies_windows.ps1`,
+  `.github/workflows/windows_mpi_build_and_test.yml` (new),
+  `dev/log_opencode_fixes.md`.
+- **Verification**: workflow YAML parses; 50 unit tests pass; serial
+  ps1 expansions traced identical. Live proof is PR #11 CI.
+- **Remaining uncertainty**: PETSc/libMesh acceptance of the MS-MPI
+  flags, Hypre download weight on MSYS, `mpiexec`/firewall behaviour —
+  each fails loudly in its own step if so.
+
 ## 2026-10-02 — MPI/MFEM: cached MooseConfig.h without conf_vars.mk (PR #10)
 
 - **CI run**: MPI/MFEM run `36992181427`, step `Build Rabbit, stage artifacts, and build wheel`: framework compile dies with `Moose.h:378: fatal error: 'mfem.hpp' file not found`, while every dep cache (PETSc/libMesh/Conduit/WASP/MFEM/MooseConfig) reported `Cache hit`.

@@ -24,6 +24,11 @@ on:
         required: false
         default: false
         type: boolean
+      mpi_impl:
+        description: "MPI implementation runtime for MPI smoke runs (openmpi or mpich)"
+        required: false
+        default: "openmpi"
+        type: string
       python-version:
         description: "Python version for the clean smoke venv (compat matrix)"
         required: false
@@ -132,13 +137,26 @@ jobs:
       - name: "Smoke (linux/macos): Install wheel in clean venv and solve"
         if: inputs.platform != 'windows'
         run: |
+          if [ "${{ inputs.mpi_impl }}" = "mpich" ] && [ -z "${UCX_TLS:-}" ]; then
+            # Ubuntu MPICH is ch4:ucx; UCX probing aborts MPI_Init where
+            # InfiniBand is absent/broken, which fails try_run probes and
+            # every binary invocation depending on runner hardware.
+            # Must precede ALL uses of the binary below (even bare
+            # `rabbit --version`, whose singleton MPI_Init already
+            # aborts). An explicit caller-provided UCX_TLS always wins.
+            export UCX_TLS="tcp,self,sm"
+          fi
           if [ "${{ inputs.platform }}" = "linux" ]; then
-            # The wheel links system OpenMPI by design (MPI libs are
-            # excluded from staging; RPATH falls back to the system
-            # openmpi lib dir), so the runtime must be present even for
-            # serial runs.
-            sudo apt-get update
-            sudo apt-get install -y openmpi-bin
+            # The wheel links its MPI ecosystem externally by design, so
+            # the matching runtime must be present. Only one MPI ships
+            # per runner, so bare mpirun resolves deterministically.
+            if [ "${{ inputs.mpi_impl }}" = "mpich" ]; then
+              sudo apt-get update
+              sudo apt-get install -y mpich
+            else
+              sudo apt-get update
+              sudo apt-get install -y openmpi-bin
+            fi
           fi
           uv venv /tmp/rabbit-smoke --python ${{ inputs.python-version }}
           uv pip install --python /tmp/rabbit-smoke/bin/python dist/*.whl
@@ -167,9 +185,28 @@ jobs:
           ls -la /tmp/rabbit-smoke-run/*.e
           if [ "${{ inputs.mpi }}" = "true" ]; then
             # MPI wheel: prove a real multi-rank run converges.
+            if [ "${{ inputs.mpi_impl }}" = "mpich" ]; then
+              # hydra silently runs singletons when its PMI handshake
+              # fails (observed locally: every rank reports 0/1), which
+              # would hollow out every proof below. Fail loudly unless
+              # the launcher really delivers 4 distinct ranks.
+              NRANKS=$(mpirun -n 4 sh -c 'echo $PMI_RANK' | sort -u | wc -l)
+              if [ "$NRANKS" != "4" ]; then
+                echo "::error::mpirun delivered $NRANKS distinct ranks, expected 4"
+                exit 1
+              fi
+              echo "MPICH launcher delivers 4 ranks"
+            fi
+            # OpenMPI refuses more ranks than slots without
+            # --oversubscribe (small runners); MPICH oversubscribes by
+            # default and has no such flag, so exempt it.
+            MPIRUN_OVERCOMMIT=""
+            if [ "${{ inputs.mpi_impl }}" != "mpich" ]; then
+              MPIRUN_OVERCOMMIT="--oversubscribe"
+            fi
             INPUT=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType; print(cube_thermomech_input_path(EElemType.HEX8))")
             mkdir -p /tmp/rabbit-smoke-mpi-run && cd /tmp/rabbit-smoke-mpi-run
-            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH mpirun -n 2 "$SMOKE_BIN" -i "$INPUT" Executioner/end_time=1
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH mpirun $MPIRUN_OVERCOMMIT -n 2 "$SMOKE_BIN" -i "$INPUT" Executioner/end_time=1
             ls -la /tmp/rabbit-smoke-mpi-run/*.e
             echo "MPI smoke solve OK"
             # MPI wheel with the MFEM backend: prove the packaged Maxwell
@@ -178,6 +215,20 @@ jobs:
             mkdir -p /tmp/rabbit-smoke-mfem-run && cd /tmp/rabbit-smoke-mfem-run
             env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_input_path, mfem_mesh_path, run_rabbit; r = run_rabbit(mfem_input_path('curlcurl'), extra_args=['Mesh/file=' + str(mfem_mesh_path('curlcurl'))]); assert r.returncode == 0; print('MFEM smoke solve OK')"
             ls -la /tmp/rabbit-smoke-mfem-run/OutputData/CurlCurl/*.csv
+            # Same MFEM case multi-rank: `mpirun -n 4 rabbit <deck>.i`
+            # proves the backend actually runs in parallel (the singleton
+            # above only proves the packaged layout resolves).
+            MFEM_MPI_INPUT=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_input_path; print(mfem_input_path('curlcurl'))")
+            MFEM_MPI_MESH=$(/tmp/rabbit-smoke/bin/python -c "from rabbit.sims import mfem_mesh_path; print(mfem_mesh_path('curlcurl'))")
+            mkdir -p /tmp/rabbit-smoke-mfem-mpi-run && cd /tmp/rabbit-smoke-mfem-mpi-run
+            # Pre-create the Outputs tree serially: all ranks racing
+            # `mkdir OutputData` aborts the run when the creation
+            # collides (observed with MPICH `-n 4`); a pre-existing
+            # directory is never created and cannot race.
+            mkdir -p OutputData/CurlCurl
+            env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH mpirun $MPIRUN_OVERCOMMIT -n 4 "$SMOKE_BIN" -i "$MFEM_MPI_INPUT" Mesh/file="$MFEM_MPI_MESH"
+            ls -la /tmp/rabbit-smoke-mfem-mpi-run/OutputData/CurlCurl/*.csv
+            echo "MFEM MPI smoke solve OK"
           else
             # Serial wheel: prove SMP threading parallelises. This step
             # runs on Linux/macOS only (the whole step is skipped on

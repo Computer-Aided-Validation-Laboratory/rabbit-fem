@@ -155,6 +155,46 @@ def test_darwin_indexed_dep_resolves(
     assert resolved["libomp.dylib"] == lib.resolve()
 
 
+def _fake_readelf(output: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Route build.common's readelf invocation to canned output."""
+    import subprocess
+
+    class _Result:
+        stdout = output
+
+    def _run(cmd: list[str], **kwargs: object) -> _Result:
+        assert cmd[:2] == ["readelf", "-d"]
+        return _Result()
+
+    monkeypatch.setattr(subprocess, "run", _run)
+
+
+def test_mpich_libs_treated_as_system(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MPICH runtime libs must stay external like the OpenMPI ones.
+
+    Regression protection for the MPICH CI failure where
+    ``stage_artifacts`` aborted with ``required shared libraries were
+    not found: libmpich.so.12, libmpichcxx.so.12, libmpichfort.so.12``:
+    the wheel links the system MPI ecosystem externally (smoke installs
+    libmpich12), so these SONAMEs resolve to no staged copy.
+    """
+    monkeypatch.setattr(sys, "platform", "linux")
+    binary = tmp_path / "rabbit"
+    binary.write_bytes(b"fake")
+    _fake_readelf(
+        " 0x0000000000000001 (NEEDED)             Shared library: [libmpich.so.12]\n"
+        " 0x0000000000000001 (NEEDED)             Shared library: [libmpichcxx.so.12]\n"
+        " 0x0000000000000001 (NEEDED)             Shared library: [libmpichfort.so.12]\n"
+        " 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n",
+        monkeypatch,
+    )
+    resolved, unresolved = find_needed_libraries(binary, {})
+    assert resolved == {}
+    assert unresolved == set()
+
+
 def _write_data_tree(root: Path) -> None:
     """Create fake moose/framework/data and solid_mechanics/data trees."""
     framework_data = root / "moose" / "framework" / "data"
