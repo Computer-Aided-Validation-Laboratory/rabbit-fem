@@ -1,5 +1,31 @@
 # OpenCode CI Fixes Log
 
+## 2026-10-06 — Release workflow gains MPICH; MPICH workflow renamed (PR #11)
+
+- Request: publish `rabbit-fem-mpich` from the release workflow and
+  name the MPICH workflows `MPICH/MFEM, Linux:` like the MPI ones.
+- `linux_mpich_build_and_test.yml` top-level `name:` is now
+  `"MPICH/MFEM, Linux: Build Wheel and Test"` (was `"MPICH: ..."`).
+  The name is referenced nowhere else, so nothing else changes; job
+  and artifact names untouched.
+- `release.yml`: new `build-mpich` job mirroring `build-mpi`
+  (MPICH system packages, `RABBIT_MPI`+`RABBIT_MPI_IMPL` env,
+  restore-only caches with keys/paths identical to
+  `linux_mpich_build_and_test.yml` — verified by diff, including
+  Conduit/MFEM/`conf_vars.mk`), new `smoke-mpich` (`mpi: true`,
+  `mpi_impl: mpich`, so it inherits the UCX default and rank
+  preflight), `publish` now needs both and gates on
+  `dist/rabbit_fem_mpich-*.whl` (PEP 427 underscore, same note
+  pattern as the MPI check). The publish step itself already
+  uploads `dist/*`, so the MPICH wheel ships with no further
+  change. PyPI side (trusted-publisher for `rabbit-fem-mpich`) is
+  the user's part.
+- Verification: both files `yaml.safe_load`; every
+  `linux-mpich-*` cache key diffed identical between the two
+  workflows; artifact name `rabbit-fem-mpich-wheel` matches
+  producer/consumer. Not yet run (release only runs on tags /
+  manual dispatch with `dry_run` available).
+
 ## 2026-10-05 (CI+local) — MPICH: UCX/IB abort on IB-less runners (PR #11)
 
 - **CI run**: MPICH `37348381898` failed again at `Build MFEM` with

@@ -1,4 +1,4 @@
-name: "MPICH: Build Wheel and Test"
+name: "MPICH/MFEM, Linux: Build Wheel and Test"
 
 # Linux MPICH variant of rabbit-fem (published as rabbit-fem-mpich).
 # Same stack as the OpenMPI/MFEM build (PETSc, libMesh, Conduit, WASP,

@@ -260,6 +260,152 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  build-mpich:
+    name: "MPICH: Build and Verify Wheel"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: "MPICH: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: "MPICH: Install system packages"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            gfortran \
+            mpich \
+            libmpich-dev \
+            patchelf \
+            libtirpc-dev \
+            libomp-dev \
+            libglu1-mesa
+
+      - name: "MPICH: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "MPICH: Set up Python"
+        run: |
+          uv python install 3.13
+          uv venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      - name: "MPICH: Install Python build tools"
+        run: |
+          uv pip install ziglang==0.16.0 wheel packaging pyyaml jinja2 pytest gmsh numpy netCDF4
+
+      # MPICH caches use the exact same -mpich suffixed keys and paths as
+      # linux_mpich_build_and_test.yml. Restore-only; that workflow owns
+      # population.
+      - name: "MPICH: Restore wheel cache"
+        uses: actions/cache/restore@v4
+        id: wheel-cache
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/lib
+            src/rabbit/share
+          key: rabbit-fem-wheel-Linux-mpich-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/build/**', 'build_rabbit.py') }}
+
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
+      - name: "MPICH: Restore PETSc cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: petsc-cache
+        with:
+          path: moose/petsc
+          key: linux-mpich-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPICH: Restore libMesh cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: libmesh-cache
+        with:
+          path: moose/libmesh/installed
+          key: linux-mpich-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPICH: Restore Conduit cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: conduit-cache
+        with:
+          path: moose/framework/contrib/conduit/installed
+          key: linux-mpich-conduit-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPICH: Restore WASP cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: wasp-cache
+        with:
+          path: |
+            moose/framework/contrib/wasp/install
+            moose/framework/contrib/hit
+          key: linux-mpich-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPICH: Restore MFEM cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mfem-cache
+        with:
+          path: moose/framework/contrib/mfem/installed
+          key: linux-mpich-mfem-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPICH: Restore MOOSE Config cache"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mooseconfig-cache
+        with:
+          # conf_vars.mk travels with the header: it carries the matching
+          # ENABLE_MFEM/MFEM_DIR flags (cf. check_cached_moose_config).
+          path: |
+            moose/framework/include/base/MooseConfig.h
+            moose/conf_vars.mk
+          key: linux-mpich-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/build/linux.py', 'scripts/build/common.py') }}
+
+      - name: "MPICH: Build MOOSE dependencies"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
+          RABBIT_MPI_IMPL: "mpich"
+        run: |
+          uv run python build_rabbit.py --moose
+
+      - name: "MPICH: Build Rabbit, stage artifacts, and build wheel"
+        if: steps.wheel-cache.outputs.cache-hit != 'true'
+        env:
+          RABBIT_MPI: "1"
+          RABBIT_MPI_IMPL: "mpich"
+        run: |
+          uv run python build_rabbit.py --wheel
+
+      - name: "MPICH: Run test suite"
+        env:
+          RABBIT_MPI: "1"
+          RABBIT_MPI_IMPL: "mpich"
+        run: |
+          uv run python build_rabbit.py --test
+
+      - name: "MPICH: Upload wheel artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rabbit-fem-mpich-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
   build-windows:
     name: "Windows: Build and Verify Wheel"
     runs-on: windows-latest
@@ -554,9 +700,20 @@ jobs:
       runner: ubuntu-24.04
       mpi: true
 
+  smoke-mpich:
+    name: "MPICH: Clean-machine smoke test"
+    needs: build-mpich
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: linux
+      artifact: rabbit-fem-mpich-wheel
+      runner: ubuntu-24.04
+      mpi: true
+      mpi_impl: mpich
+
   publish:
     name: "Publish Consolidated Release to PyPI"
-    needs: [build-linux, build-windows, build-macos, build-mpi, smoke-linux, smoke-windows, smoke-macos, smoke-mpi]
+    needs: [build-linux, build-windows, build-macos, build-mpi, build-mpich, smoke-linux, smoke-windows, smoke-macos, smoke-mpi, smoke-mpich]
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     environment:
@@ -595,10 +752,12 @@ jobs:
           win_count=$(ls dist/*win_amd64.whl 2>/dev/null | wc -l)
           mac_count=$(ls dist/*macosx*.whl 2>/dev/null | wc -l)
           # NOTE: wheel filenames normalize "-" to "_" (PEP 427), so the
-          # rabbit-fem-mpi distribution lands as rabbit_fem_mpi-*.whl.
-          # Glob the normalized stem, not the project name.
+          # rabbit-fem-mpi and rabbit-fem-mpich distributions land as
+          # rabbit_fem_mpi-*.whl and rabbit_fem_mpich-*.whl.
+          # Glob the normalized stems, not the project names.
           mpi_count=$(ls dist/rabbit_fem_mpi-*.whl 2>/dev/null | wc -l)
-          echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s), $mac_count macOS wheel(s) and $mpi_count MPI wheel(s)."
+          mpich_count=$(ls dist/rabbit_fem_mpich-*.whl 2>/dev/null | wc -l)
+          echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s), $mac_count macOS wheel(s), $mpi_count MPI wheel(s) and $mpich_count MPICH wheel(s)."
           if [ "$linux_count" -lt 1 ]; then
             echo "::error::Missing Linux manylinux wheel in dist/!"
             exit 1
@@ -613,6 +772,10 @@ jobs:
           fi
           if [ "$mpi_count" -lt 1 ]; then
             echo "::error::Missing rabbit-fem-mpi wheel in dist/!"
+            exit 1
+          fi
+          if [ "$mpich_count" -lt 1 ]; then
+            echo "::error::Missing rabbit-fem-mpich wheel in dist/!"
             exit 1
           fi
           echo "All platform wheels verified successfully."
