@@ -54,7 +54,15 @@
 ### Verification
 
 - Local: 49 tests pass; `UCX_TLS=ib` force-fails, default runs.
-- CI: exercising on the MPICH leg (try_run must now pass on any runner).
+- CI: MPICH build `37356896430` SUCCESS with the default (MFEM
+  try_run passes deterministically now); MPICH smoke re-run
+  SUCCESS — the PMI rank preflight passes on healthy runners
+  (no false positive) and every solve converges.
+- Incident 21:0xZ: the three Linux py-3.13 smokes flipped to
+  `cancelled` with no new push and no author action (user
+  confirmed no UI interaction) — platform blip. Re-ran each
+  smoke job via `gh run rerun --job`: MPI + serial smokes SUCCESS.
+  Full board green on `1ac32ab`.
 
 ### Remaining uncertainty / known limitations
 
