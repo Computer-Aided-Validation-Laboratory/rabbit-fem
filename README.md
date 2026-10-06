@@ -2,7 +2,7 @@
 
 `rabbit-fem` is a lightweight, standalone Python distribution of the [MOOSE](https://mooseframework.inl.gov/) (Multiphysics Object-Oriented Simulation Environment) finite element framework, tailored specifically for **thermal**, **solid mechanics**, and **contact** simulation.
 
-Packaged as a self-contained Python wheel (~60 MB), `rabbit-fem` provides a drop-in `rabbit` command line executable and Python dataset API that runs MOOSE simulations without requiring external MOOSE or libMesh system installations.
+Packaged as a self-contained Python wheel, `rabbit-fem` provides a drop-in `rabbit` command line executable and Python dataset API that runs MOOSE simulations without requiring external MOOSE or libMesh system installations.
 
 ---
 
@@ -62,6 +62,24 @@ The MPI variant additionally ships the `MFEM` finite element backend
 see `src/rabbit/sims/mfem/`). Upstream MOOSE supports MFEM only with
 MPI, so the serial wheel excludes it.
 
+For clusters and systems whose MPI is MPICH rather than OpenMPI,
+install the MPICH variant instead (Linux only, same MFEM backend):
+
+```bash
+pip install rabbit-fem-mpich
+```
+
+```bash
+mpiexec.mpich -n 4 rabbit simulation.i
+```
+
+The explicit `mpiexec.mpich`/`mpirun.mpich` names keep working
+regardless of the machine's MPI default (`update-alternatives`);
+on MPICH-only systems bare `mpirun` resolves to the same launcher.
+On machines without working InfiniBand, export
+`UCX_TLS=tcp,self,sm` before running, otherwise MPICH's UCX layer
+can abort during `MPI_Init` (`ibv_create_srq() failed`).
+
 ### Runtime system requirements
 
 The serial wheel is fully self-contained on all platforms. The MPI
@@ -69,6 +87,7 @@ variant links the MPI ecosystem at runtime, which must be installed
 separately (the launcher version must match the runtime):
 
 - **Linux (MPI variant)**: OpenMPI runtime — `sudo apt-get install -y openmpi-bin`
+- **Linux (MPICH variant)**: MPICH runtime — `sudo apt-get install -y mpich`
 
 ---
 
