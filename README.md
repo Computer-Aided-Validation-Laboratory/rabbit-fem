@@ -62,7 +62,7 @@ system MPI installation and parallelises on one machine with
 `rabbit simulation.i --n-threads=N`. Only one variant may be installed
 at a time.
 
-For multi-rank runs, install the MPI variant instead (Linux only):
+For multi-rank runs with OpenMPI, install the OpenMPI variant (Linux only):
 
 ```bash
 pip install rabbit-fem-mpi
@@ -72,13 +72,32 @@ pip install rabbit-fem-mpi
 mpirun -n 4 rabbit simulation.i
 ```
 
+For clusters and systems whose MPI is MPICH rather than OpenMPI,
+install the MPICH variant instead (Linux only):
+
+```bash
+pip install rabbit-fem-mpich
+```
+
+```bash
+mpiexec.mpich -n 4 rabbit simulation.i
+```
+
+The explicit `mpiexec.mpich`/`mpirun.mpich` names keep working
+regardless of the machine's MPI default (`update-alternatives`);
+on MPICH-only systems bare `mpirun` resolves to the same launcher.
+On machines without working InfiniBand, export
+`UCX_TLS=tcp,self,sm` before running, otherwise MPICH's UCX layer
+can abort during `MPI_Init` (`ibv_create_srq() failed`).
+
 ### Runtime system requirements
 
 The serial wheel is fully self-contained on all platforms. The MPI
-variant links the MPI ecosystem at runtime, which must be installed
+variants link the MPI ecosystem at runtime, which must be installed
 separately (the launcher version must match the runtime):
 
-- **Linux (MPI variant)**: OpenMPI runtime — `sudo apt-get install -y openmpi-bin`
+- **Linux (OpenMPI variant / `rabbit-fem-mpi`)**: OpenMPI runtime — `sudo apt-get install -y openmpi-bin`
+- **Linux (MPICH variant / `rabbit-fem-mpich`)**: MPICH runtime — `sudo apt-get install -y mpich`
 
 ---
 
