@@ -1,8 +1,23 @@
-# Rabbit Finite Element Modelling
+<p align="center">
+    <img src="https://raw.githubusercontent.com/Computer-Aided-Validation-Laboratory/rabbit-fem/main/images/logo_rabbitfem.png" alt="Rabbit FEM Logo" width="620">
+</p>
+
+<p align="center"><strong>An easy to install, pre-compiled and portable MOOSE distribution for thermo-mechanical finite element simulation.</strong></p>
+
+<p align="center">
+    <a href="https://pypi.org/project/rabbit-fem/"><img src="https://img.shields.io/pypi/v/rabbit-fem?label=PyPI" alt="PyPI version"></a>
+    <a href="https://pypi.org/project/rabbit-fem/"><img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Supported Python versions"></a>
+    <a href="https://ziglang.org/download/"><img src="https://img.shields.io/badge/Zig-0.16.0-F7A41D?logo=zig&logoColor=white" alt="Zig version"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/linux_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/linux_build_and_test.yml?branch=main&label=Linux" alt="Linux Tests"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/macos_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/macos_build_and_test.yml?branch=main&label=macOS" alt="macOS Tests"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/windows_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/windows_build_and_test.yml?branch=main&label=Windows" alt="Windows Tests"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/mpi_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/mpi_build_and_test.yml?branch=main&label=MPI" alt="MPI Tests"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Computer-Aided-Validation-Laboratory/rabbit-fem" alt="LGPL-2.1 license"></a>
+</p>
 
 `rabbit-fem` is a lightweight, standalone Python distribution of the [MOOSE](https://mooseframework.inl.gov/) (Multiphysics Object-Oriented Simulation Environment) finite element framework, tailored specifically for **thermal**, **solid mechanics**, and **contact** simulation.
 
-Packaged as a self-contained Python wheel (~60 MB), `rabbit-fem` provides a drop-in `rabbit` command line executable and Python dataset API that runs MOOSE simulations without requiring external MOOSE or libMesh system installations.
+Packaged as a self-contained Python wheel, `rabbit-fem` provides a drop-in `rabbit` command line executable and Python dataset API that runs MOOSE simulations without requiring external MOOSE or libMesh system installations.
 
 ---
 

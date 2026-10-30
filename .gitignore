@@ -16,6 +16,7 @@ plans/
 refs/
 .*/
 !.github/
+*.log
 
 # MOOSE and Rabbit build artifacts
 moose/
