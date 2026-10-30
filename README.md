@@ -72,6 +72,11 @@ pip install rabbit-fem-mpi
 mpirun -n 4 rabbit simulation.i
 ```
 
+The MPI variants additionally ship the `MFEM` finite element backend
+(parallel Nédélec/Maxwell and diffusion problems via `MFEMProblem`;
+see `src/rabbit/sims/mfem/`). Upstream MOOSE supports MFEM only with
+MPI, so the serial wheel excludes it.
+
 For clusters and systems whose MPI is MPICH rather than OpenMPI,
 install the MPICH variant instead (Linux only):
 

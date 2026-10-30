@@ -60,7 +60,21 @@ foreach ($tool in $requiredMsysTools) {
 }
 if ($needsInstall) {
     Write-Host "[*] Synchronizing MSYS2 database and installing required packages..." -ForegroundColor Yellow
-    & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/python-pip msys/cmake
+    # Mirror rate-limiting (HTTP 429) is genuinely externally flaky: retry
+    # with backoff (same pattern as the submodule clone retries below)
+    # instead of limping on with missing tools.
+    $pacmanAttempts = 0
+    $pacmanMaxAttempts = 5
+    while ($true) {
+        $pacmanAttempts++
+        & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm msys/diffutils msys/make msys/patch msys/m4 msys/git msys/python msys/python-pip msys/cmake
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($pacmanAttempts -ge $pacmanMaxAttempts) {
+            throw "MSYS2 package installation failed after $pacmanMaxAttempts attempts (pacman exit $LASTEXITCODE); failing early instead of building with missing tools."
+        }
+        Write-Host "[!] MSYS2 package install failed (transient mirror/rate-limit error). Waiting 30s before retry ($pacmanAttempts/$pacmanMaxAttempts)..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 30
+    }
 }
 # MSYS python modules required by MOOSE/PETSc configure scripts (premake.py,
 # versioner.py, PETSc configure). These must be ensured on every run: a cached
@@ -74,6 +88,38 @@ foreach ($tool in $requiredMsysTools) {
     }
 }
 Write-Host "[OK] MSYS2 required tools verified (diff, make, patch, m4, git, python3, cmake)." -ForegroundColor Green
+
+# 1b. MPI variant selection (system MPI = MS-MPI).
+# Serial (default) behaviour is byte-identical when RABBIT_MPI is unset:
+# every MPI difference below is gated on $IsMpi. MPI builds assume a
+# system MPI: headers + MinGW import lib from the MSYS2
+# mingw-w64-x86_64-msmpi package, plus the MS-MPI runtime (mpiexec) on
+# PATH (mpi4py/setup-mpi in CI). No MFEM on Windows; the MPI/MFEM
+# backend is Linux-only.
+$IsMpi = ($env:RABBIT_MPI -eq "1")
+if ($IsMpi) {
+    Write-Host "[*] MPI variant selected (RABBIT_MPI=1): using system MS-MPI." -ForegroundColor Cyan
+    # Headers + MinGW import lib live in the MSYS2 tree this script builds
+    # with ($MsysRoot) — not necessarily the tree a CI setup step
+    # provisioned (a runner can carry an image MSYS2 plus a
+    # setup-msys2 temp install side by side). Install here so the files
+    # are guaranteed beside the toolchain that consumes them. The import
+    # lib is libmsmpi.dll.a (per the package file list), not libmsmpi.a.
+    $MsMpiHeader = Join-Path $MsysRoot "mingw64\include\mpi.h"
+    $MsMpiLib = Join-Path $MsysRoot "mingw64\lib\libmsmpi.dll.a"
+    if (-not (Test-Path $MsMpiHeader) -or -not (Test-Path $MsMpiLib)) {
+        Write-Host "[*] Installing system MS-MPI for MinGW (mingw-w64-x86_64-msmpi) into $MsysRoot..." -ForegroundColor Yellow
+        & (Join-Path $MsysRoot "usr\bin\pacman.exe") -Sy --needed --noconfirm mingw-w64-x86_64-msmpi
+        if ($LASTEXITCODE -ne 0) { throw "Failed to install mingw-w64-x86_64-msmpi into $MsysRoot (pacman exit $LASTEXITCODE)." }
+    }
+    if (-not (Test-Path $MsMpiHeader) -or -not (Test-Path $MsMpiLib)) {
+        throw "Windows MPI build requires system MS-MPI for MinGW (MSYS2 package mingw-w64-x86_64-msmpi provides $MsMpiHeader and $MsMpiLib). Install it and retry."
+    }
+    Write-Host "[OK] System MS-MPI found ($MsMpiHeader)." -ForegroundColor Green
+    if (-not (Get-Command mpiexec.exe -ErrorAction SilentlyContinue)) {
+        Write-Host "[!] mpiexec.exe not on PATH (MS-MPI runtime). Build proceeds; multi-rank runs will fail." -ForegroundColor Yellow
+    }
+}
 
 # 2. Check or create Python virtual environment with uv
 $VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
@@ -99,6 +145,9 @@ Write-Host "[OK] Zig compiler found: $ZigExe" -ForegroundColor Green
 $driveLetter = $RepoRoot.Substring(0, 1).ToLower()
 $pathRest = $RepoRoot.Substring(2).Replace('\', '/')
 $RepoRootPosix = "/$driveLetter$pathRest"
+$MsysDriveLetter = $MsysRoot.Substring(0, 1).ToLower()
+$MsysPathRest = $MsysRoot.Substring(2).Replace('\', '/')
+$MsysRootPosix = "/$MsysDriveLetter$MsysPathRest"
 
 # 5. Set up compiler wrappers
 $WrappersDir = Join-Path $RepoRoot ".zig_wrappers"
@@ -333,7 +382,30 @@ if ($Stage -in @("all", "petsc")) {
         $applyPetsc = "cd moose/petsc && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/petsc.patch`" || true"
         Invoke-MsysBash $applyPetsc "Applying PETSc Windows patch"
 
-        $petscConfig = "cd moose/petsc && python3 ./configure PETSC_ARCH=arch-windows-opt --with-cc=$RepoRootPosix/.zig_wrappers/zig-cc --with-cxx=$RepoRootPosix/.zig_wrappers/zig-cxx --with-ar=$RepoRootPosix/.zig_wrappers/zig-ar --with-ranlib=$RepoRootPosix/.zig_wrappers/zig-ranlib --with-fc=0 --with-mpi=0 --with-shared-libraries=0 --with-debugging=0 --download-f2cblaslapack=1 --with-windows-graphics=0 --with-x=0 --with-make-np=$Jobs && make PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt all"
+        # MPI builds compile against system MS-MPI (no mpicc wrappers
+        # exist for MS-MPI, so point PETSc at the headers/lib directly)
+        # and download Hypre: the packaged inputs request 'hypre
+        # boomeramg', which the MPI suite exercises without the serial
+        # ILU fallback.
+        if ($IsMpi) {
+            $MpiIncPosix = "$MsysRootPosix/mingw64/include"
+            $MpiLibPosix = "$MsysRootPosix/mingw64/lib/libmsmpi.dll.a"
+            # --download-hypre-configure-arguments: Hypre's autotools
+            # config.guess cannot determine the MSYS host (dies with
+            # 'invalid value of canonical host'), so name it explicitly.
+            # Same mingw64 target the whole toolchain builds for.
+            $petscMpiFlags = "--with-mpi=1 --with-mpi-compilers=0 --with-mpi-include=$MpiIncPosix --with-mpi-lib=$MpiLibPosix --download-hypre=1 --download-hypre-configure-arguments=--host=x86_64-w64-mingw32"
+            # Hypre's configure probes (mpi.h, MPI symbols) run with
+            # plain CFLAGS, so --with-mpi-include alone never reaches
+            # them and the download silently builds serial mpistubs.
+            # The zig wrappers append this dir as -I (see
+            # RABBIT_MPI_INCLUDE in scripts/windows_wrappers); set for
+            # MPI builds only, inherited by the configure below.
+            $env:RABBIT_MPI_INCLUDE = $MpiIncPosix
+        } else {
+            $petscMpiFlags = "--with-mpi=0"
+        }
+        $petscConfig = "cd moose/petsc && python3 ./configure PETSC_ARCH=arch-windows-opt --with-cc=$RepoRootPosix/.zig_wrappers/zig-cc --with-cxx=$RepoRootPosix/.zig_wrappers/zig-cxx --with-ar=$RepoRootPosix/.zig_wrappers/zig-ar --with-ranlib=$RepoRootPosix/.zig_wrappers/zig-ranlib --with-fc=0 $petscMpiFlags --with-shared-libraries=0 --with-debugging=0 --download-f2cblaslapack=1 --with-windows-graphics=0 --with-x=0 --with-make-np=$Jobs && make PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt all"
         Invoke-MsysBash $petscConfig "Configuring and building PETSc (arch-windows-opt)"
     } else {
         Write-Host "[OK] PETSc already built at $PetscLib" -ForegroundColor Green
@@ -385,7 +457,25 @@ done
         $applyMetis = "cd moose/libmesh/contrib/metis/GKlib && patch -p1 -N -r - < `"$RepoRootPosix/patches/windows/metis.patch`" || true"
         Invoke-MsysBash $applyMetis "Applying METIS Windows patch"
 
-        $libmeshBuild = "cd moose/libmesh && export PETSC_DIR=$RepoRootPosix/moose/petsc && export PETSC_ARCH=arch-windows-opt && ./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode --disable-petsc-hypre-required --without-gdb-command --disable-fortran --disable-exodus-fortran PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
+        # MPI builds enable libMesh MPI against the same system MS-MPI
+        # (CPPFLAGS/LDFLAGS since there are no mpicc wrappers) and keep
+        # the PETSc-Hypre requirement: MPI PETSc ships Hypre (see the
+        # --download-hypre flag above), which the MPI suite needs.
+        # NOTE: the import lib must be spelled -lmsmpi.dll (resolves
+        # libmsmpi.dll.a). Bare -lmsmpi only searches libmsmpi.a,
+        # which does not exist, so the C compiler check fails with
+        # "cannot create executables" (verified against zig 0.16.0).
+        if ($IsMpi) {
+            $MpiIncPosix = "$MsysRootPosix/mingw64/include"
+            $libmeshMpiEnv = "CPPFLAGS=`"-I$MpiIncPosix`" LDFLAGS=`"-L$MsysRootPosix/mingw64/lib -lmsmpi.dll`" "
+            $libmeshMpiFlags = "--with-mpi"
+            $libmeshHypreFlag = ""
+        } else {
+            $libmeshMpiEnv = ""
+            $libmeshMpiFlags = ""
+            $libmeshHypreFlag = "--disable-petsc-hypre-required"
+        }
+        $libmeshBuild = "cd moose/libmesh && export PETSC_DIR=$RepoRootPosix/moose/petsc && export PETSC_ARCH=arch-windows-opt && $libmeshMpiEnv./configure --prefix=$RepoRootPosix/moose/libmesh/installed --host=x86_64-w64-mingw32 CC=$RepoRootPosix/.zig_wrappers/zig-cc CXX=$RepoRootPosix/.zig_wrappers/zig-cxx AR=$RepoRootPosix/.zig_wrappers/zig-ar RANLIB=$RepoRootPosix/.zig_wrappers/zig-ranlib --disable-shared --enable-static --with-methods=opt --enable-unique-id --disable-warnings --enable-silent-rules --disable-openmp --disable-boost --with-thread-model=none --disable-maintainer-mode $libmeshHypreFlag $libmeshMpiFlags --without-gdb-command --disable-fortran --disable-exodus-fortran PETSC_DIR=$RepoRootPosix/moose/petsc PETSC_ARCH=arch-windows-opt && make -j$Jobs && make install"
         Invoke-MsysBash $libmeshBuild "Configuring and building libMesh"
     } else {
         Write-Host "[OK] libMesh already built at $LibMeshLib" -ForegroundColor Green
@@ -475,10 +565,13 @@ if ($Stage -in @("all", "rabbit")) {
         Write-Host "[OK] Staged data files to $DataDest" -ForegroundColor Green
     }
 
-    # The Windows binary is always the serial/SMP variant (PETSc MPIUNI):
-    # record it so the CLI applies serial defaults (e.g. ILU fallback).
-    Set-Content -Path (Join-Path $RepoRoot "src\rabbit\variant.txt") -Value "serial"
-    Write-Host "[OK] Staged variant marker (serial)." -ForegroundColor Green
+    # Record the build variant so the CLI applies the right defaults
+    # (e.g. the serial ILU fallback): "mpi" for system-MS-MPI builds,
+    # "serial" otherwise.
+    $VariantMarker = "serial"
+    if ($IsMpi) { $VariantMarker = "mpi" }
+    Set-Content -Path (Join-Path $RepoRoot "src\rabbit\variant.txt") -Value $VariantMarker
+    Write-Host "[OK] Staged variant marker ($VariantMarker)." -ForegroundColor Green
 }
 
 # 12. Run Verification Tests

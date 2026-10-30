@@ -110,6 +110,42 @@ def build_wasp_stage(
         build_wasp(repo_dir, moose_dir, zigcc_path, zigcxx_path)
 
 
+def build_conduit_stage(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Dispatch Conduit compilation to the Linux/MPI handler."""
+    if sys.platform == "linux":
+        from scripts.build.linux import build_conduit
+
+        build_conduit(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    else:
+        raise RuntimeError(
+            "Conduit/MFEM stages are only supported on Linux "
+            f"(this machine reports {sys.platform})."
+        )
+
+
+def build_mfem_stage(
+    repo_dir: Path,
+    moose_dir: Path,
+    zigcc_path: Path,
+    zigcxx_path: Path,
+) -> None:
+    """Dispatch MFEM backend compilation to the Linux/MPI handler."""
+    if sys.platform == "linux":
+        from scripts.build.linux import build_mfem
+
+        build_mfem(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+    else:
+        raise RuntimeError(
+            "Conduit/MFEM stages are only supported on Linux "
+            f"(this machine reports {sys.platform})."
+        )
+
+
 def configure_moose_stage(
     repo_dir: Path,
     moose_dir: Path,
@@ -178,6 +214,16 @@ def parse_args() -> argparse.Namespace:
         help="Build only upstream WASP and HIT dependency stage.",
     )
     parser.add_argument(
+        "--build-conduit",
+        action="store_true",
+        help="Build only upstream Conduit dependency stage (for MFEM).",
+    )
+    parser.add_argument(
+        "--build-mfem",
+        action="store_true",
+        help="Build only upstream MFEM backend stage (MPI only).",
+    )
+    parser.add_argument(
         "--configure-moose",
         action="store_true",
         help="Run only MOOSE framework configuration stage.",
@@ -190,7 +236,8 @@ def parse_args() -> argparse.Namespace:
         metavar="PATH",
         help=(
             "Clone and build upstream MOOSE dependencies "
-            "(PETSc, libMesh, WASP). Optionally provide path to MOOSE."
+            "(PETSc, libMesh, WASP, plus Conduit/MFEM for MPI). "
+            "Optionally provide path to MOOSE."
         ),
     )
     parser.add_argument(
@@ -273,6 +320,8 @@ def main() -> None:
             or args.build_petsc
             or args.build_libmesh
             or args.build_wasp
+            or args.build_conduit
+            or args.build_mfem
             or args.configure_moose
         )
     ):
@@ -322,6 +371,14 @@ def main() -> None:
         configure_moose_stage(
             repo_dir, moose_dir, zigcc_path, zigcxx_path
         )
+        return
+
+    if args.build_conduit:
+        build_conduit_stage(repo_dir, moose_dir, zigcc_path, zigcxx_path)
+        return
+
+    if args.build_mfem:
+        build_mfem_stage(repo_dir, moose_dir, zigcc_path, zigcxx_path)
         return
 
     # 3. If --moose or --all requested, build all MOOSE dependencies

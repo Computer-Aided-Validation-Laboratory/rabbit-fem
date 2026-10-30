@@ -61,7 +61,17 @@ _MOOSE_DEP_SUBMODULES = {
     "petsc": "petsc",
     "libmesh": "libmesh",
     "wasp": "framework/contrib/wasp",
+    "mfem": "framework/contrib/mfem",
+    "conduit": "framework/contrib/conduit",
 }
+
+# Submodules only the MPI variant (MFEM backend) needs. The serial
+# `rabbit-fem` wheel never compiles against them, so serial builds must
+# not fetch or verify them: a serial run should stay green when an
+# MFEM/Conduit pin or submodule breaks, and vice versa. Variant
+# isolation is via `is_mpi_build()` (RABBIT_MPI=1); CI additionally
+# isolates via separate runners and `-serial`/`-mpi` cache keys.
+_MPI_ONLY_MOOSE_DEPS = frozenset({"mfem", "conduit"})
 
 
 def get_pinned_moose_deps(repo_dir: Path) -> dict[str, str]:
@@ -93,7 +103,10 @@ def verify_moose_deps(moose_dir: Path, repo_dir: Path) -> None:
     deps = get_pinned_moose_deps(repo_dir)
     if not deps:
         return
+    mpi = is_mpi_build()
     for name, rel_path in _MOOSE_DEP_SUBMODULES.items():
+        if name in _MPI_ONLY_MOOSE_DEPS and not mpi:
+            continue
         expected = deps.get(name)
         if not expected:
             continue
@@ -270,8 +283,34 @@ def is_wasp_ready(moose_dir: Path) -> bool:
     )
 
 
+def is_conduit_ready(moose_dir: Path) -> bool:
+    """Check if Conduit source or build is present."""
+    conduit_dir = moose_dir / "framework" / "contrib" / "conduit"
+    return (
+        (conduit_dir / "installed" / "lib").is_dir()
+        or (conduit_dir / "installed" / "include").is_dir()
+        or (conduit_dir / "src" / "CMakeLists.txt").is_file()
+        or (conduit_dir / "CMakeLists.txt").is_file()
+    )
+
+
+def is_mfem_ready(moose_dir: Path) -> bool:
+    """Check if MFEM source or build is present."""
+    mfem_dir = moose_dir / "framework" / "contrib" / "mfem"
+    return (
+        (mfem_dir / "installed" / "lib").is_dir()
+        or (mfem_dir / "installed" / "include").is_dir()
+        or (mfem_dir / "CMakeLists.txt").is_file()
+    )
+
+
 def ensure_moose_submodules(moose_dir: Path) -> None:
-    """Check and initialize missing MOOSE git submodules."""
+    """Check and initialize missing MOOSE git submodules.
+
+    Only the MPI variant materializes the Conduit/MFEM submodules (the
+    MFEM backend is MPI-only); serial builds fetch just
+    petsc/libmesh/wasp so MFEM-side breakage cannot red a serial run.
+    """
     needed: list[str] = []
     if not is_petsc_ready(moose_dir):
         needed.append("petsc")
@@ -279,6 +318,11 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
         needed.append("libmesh")
     if not is_wasp_ready(moose_dir):
         needed.append("framework/contrib/wasp")
+    if is_mpi_build():
+        if not is_conduit_ready(moose_dir):
+            needed.append("framework/contrib/conduit")
+        if not is_mfem_ready(moose_dir):
+            needed.append("framework/contrib/mfem")
 
     if not needed:
         print("All MOOSE submodules/dependencies are present.")
@@ -306,6 +350,13 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
         "update",
         "--init",
         "--recursive",
+        # framework/contrib/mfem and framework/contrib/conduit set
+        # `update = none` in .gitmodules, which makes a plain update
+        # print "Skipping submodule ..." even for explicitly listed
+        # paths. An explicit --checkout overrides that default, matching
+        # what MOOSE's own update_and_rebuild_{mfem,conduit}.sh scripts
+        # pass. For other submodules this is the default strategy.
+        "--checkout",
     ] + needed
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):
@@ -323,6 +374,69 @@ def ensure_moose_submodules(moose_dir: Path) -> None:
                 "(GitLab load/rate limit backoff)..."
             )
             time.sleep(30)
+
+
+def mpi_impl() -> str:
+    """Which MPI implementation the MPI variant builds against.
+
+    ``openmpi`` (default) or ``mpich``, selected by ``RABBIT_MPI_IMPL``.
+    Only meaningful when :func:`is_mpi_build` is true; the serial build
+    never consults it. Explicit suffixed wrapper names
+    (``mpicc.mpich``) keep the selection immune to the machine's
+    update-alternatives state.
+    """
+    impl = os.environ.get("RABBIT_MPI_IMPL", "openmpi").strip().lower()
+    if impl not in ("openmpi", "mpich"):
+        raise RuntimeError(
+            f"Unknown MPI implementation {impl!r} in RABBIT_MPI_IMPL; "
+            'expected "openmpi" or "mpich".'
+        )
+    return impl
+
+
+def mpi_compiler_env(
+    zigcc_path: Path, zigcxx_path: Path
+) -> dict[str, str]:
+    """Compiler selection for MPI builds, by implementation.
+
+    OpenMPI wrappers read ``OMPI_CC``/``OMPI_CXX``; MPICH wrappers read
+    ``MPICH_CC``/``MPICH_CXX`` (both documented wrapper variables).
+    MPICH names are explicitly suffixed so a machine with both runtimes
+    still resolves deterministically.
+    """
+    if mpi_impl() == "mpich":
+        return {
+            "MPICH_CC": str(zigcc_path),
+            "MPICH_CXX": str(zigcxx_path),
+            "CC": "mpicc.mpich",
+            "CXX": "mpicxx.mpich",
+        }
+    return {
+        "OMPI_CC": str(zigcc_path),
+        "OMPI_CXX": str(zigcxx_path),
+        "CC": "mpicc",
+        "CXX": "mpicxx",
+    }
+
+
+def mpi_fortran_wrapper() -> str:
+    """MPI Fortran wrapper for the selected implementation."""
+    if is_mpi_build() and mpi_impl() == "mpich":
+        return "mpif90.mpich"
+    return "mpif90"
+
+
+def mpi_exec() -> str:
+    """MPI launcher for the selected implementation.
+
+    Mirrors :func:`mpi_fortran_wrapper`: the explicit
+    ``mpiexec.mpich`` keeps MPICH runs off a foreign default launcher
+    (PETSc aborts configure when MPICH libraries meet an Open MPI
+    mpiexec). Serial builds never consult it.
+    """
+    if is_mpi_build() and mpi_impl() == "mpich":
+        return "mpiexec.mpich"
+    return "mpiexec"
 
 
 def build_rabbit_binary(
@@ -348,10 +462,7 @@ def build_rabbit_binary(
     env["MOOSE_DIR"] = str(moose_dir)
     env["METHODS"] = "opt"
     if is_mpi_build():
-        env["OMPI_CC"] = str(zigcc_path)
-        env["OMPI_CXX"] = str(zigcxx_path)
-        env["CC"] = "mpicc"
-        env["CXX"] = "mpicxx"
+        env.update(mpi_compiler_env(zigcc_path, zigcxx_path))
     else:
         env["CC"] = str(zigcc_path)
         env["CXX"] = str(zigcxx_path)
@@ -392,6 +503,9 @@ def find_needed_libraries(
         "libmpi.so",
         "libmpi_",
         "libmpi_cxx.so",
+        # MPICH runtime stays external like OpenMPI above (the wheel
+        # links the system MPI ecosystem; smoke installs libmpich12).
+        "libmpich",
         "libopen-pal.so",
         "libopen-rte.so",
         "libhwloc.so",
@@ -755,8 +869,15 @@ def stage_artifacts(
                 patchelf_bin = str(cand)
                 break
 
-        rpath_app = "$ORIGIN/../lib:/usr/lib/x86_64-linux-gnu/openmpi/lib"
-        rpath_lib = "$ORIGIN:/usr/lib/x86_64-linux-gnu/openmpi/lib"
+        if is_mpi_build() and mpi_impl() == "mpich":
+            # MPICH libs live in the default loader path
+            # (/usr/lib/x86_64-linux-gnu via libmpich12), so only the
+            # relocatable entries are needed.
+            rpath_app = "$ORIGIN/../lib"
+            rpath_lib = "$ORIGIN"
+        else:
+            rpath_app = "$ORIGIN/../lib:/usr/lib/x86_64-linux-gnu/openmpi/lib"
+            rpath_lib = "$ORIGIN:/usr/lib/x86_64-linux-gnu/openmpi/lib"
 
         subprocess.run(
             [patchelf_bin, "--set-rpath", rpath_app, str(dest_bin)],
@@ -778,16 +899,20 @@ def stage_artifacts(
 def build_wheel(repo_dir: Path) -> Path:
     """Build standalone Python wheel package and tag appropriately.
 
-    The MPI variant is published under the ``rabbit-fem-mpi`` project
-    name; the default serial/SMP build keeps ``rabbit-fem``.
+    MPI variants are published under their own project names
+    (``rabbit-fem-mpi`` for OpenMPI, ``rabbit-fem-mpich`` for MPICH);
+    the default serial/SMP build keeps ``rabbit-fem``.
     """
     print("--> Building standalone wheel package...")
     pyproject_file = repo_dir / "pyproject.toml"
     original_pyproject = pyproject_file.read_text(encoding="utf-8")
     renamed = False
     if is_mpi_build():
+        dist_name = (
+            "rabbit-fem-mpich" if mpi_impl() == "mpich" else "rabbit-fem-mpi"
+        )
         renamed_text = original_pyproject.replace(
-            'name = "rabbit-fem"', 'name = "rabbit-fem-mpi"', 1
+            'name = "rabbit-fem"', f'name = "{dist_name}"', 1
         )
         if renamed_text == original_pyproject:
             raise RuntimeError(

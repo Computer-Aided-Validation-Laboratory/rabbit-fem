@@ -1,0 +1,129 @@
+# Packaged from MOOSE test/tests/mfem/kernels/diffusion.i at moose 975c9a1c.
+# Mesh path adapted to the packaged layout (mesh ships alongside).
+[Mesh]
+  type = MFEMFileMesh
+  file = mug.e
+[]
+
+[Problem]
+  type = MFEMProblem
+[]
+
+[FESpaces]
+  [H1FESpace]
+    type = MFEMScalarFESpace
+    fec_type = H1
+    fec_order = FIRST
+  []
+  [HCurlFESpace]
+    type = MFEMVectorFESpace
+    fec_type = ND
+    fec_order = FIRST
+  []
+[]
+
+[Variables]
+  [concentration]
+    type = MFEMVariable
+    fespace = H1FESpace
+  []
+[]
+
+[AuxVariables]
+  [concentration_gradient]
+    type = MFEMVariable
+    fespace = HCurlFESpace
+  []
+[]
+
+[AuxKernels]
+  [grad]
+    type = MFEMGradAux
+    variable = concentration_gradient
+    source = concentration
+    execute_on = TIMESTEP_END
+  []
+[]
+
+[BCs]
+  [bottom]
+    type = MFEMScalarDirichletBC
+    variable = concentration
+    boundary = 'bottom'
+    coefficient = 1.0
+  []
+  [top]
+    type = MFEMScalarDirichletBC
+    variable = concentration
+    boundary = 'top'
+  []
+[]
+
+[Kernels]
+  [diff]
+    type = MFEMDiffusionKernel
+    variable = concentration
+  []
+[]
+
+
+[Solvers]
+  inactive = 'jacobi'
+  [boomeramg]
+    type = MFEMHypreBoomerAMG
+  []
+  [jacobi]
+    type = MFEMOperatorJacobiSmoother
+  []
+  [main]
+    type = MFEMHypreGMRES
+    preconditioner = boomeramg
+    l_tol = 1e-16
+    l_max_its = 1000
+  []
+[]
+
+[Executioner]
+  type = MFEMSteady
+  device = cpu
+[]
+
+[Postprocessors]
+  [solution_l2_norm]
+    type = MFEML2Error
+    variable = concentration
+    function = 0
+  []
+[]
+
+[VectorPostprocessors]
+  [line_sample]
+    type = MFEMVariableLineValueSampler
+    variable = 'concentration'
+    start_point = '2.125 0 -2.375'
+    end_point = '2.125 0 2.625'
+    num_points = 101
+  []
+[]
+
+[Outputs]
+  active = CSV
+  [CSV]
+    type = CSV
+    file_base = OutputData/diffusion
+  []
+  [ParaViewDataCollection]
+    type = MFEMParaViewDataCollection
+    file_base = OutputData/ParaViewDataCollection
+    vtk_format = ASCII
+  []
+  [VisItDataCollection]
+    type = MFEMVisItDataCollection
+    file_base = OutputData/VisItDataCollection
+  []
+  [ConduitDataCollection]
+    type = MFEMConduitDataCollection
+    file_base = OutputData/ConduitDataCollection/Run
+    protocol = conduit_bin
+  []
+[]
