@@ -18,6 +18,7 @@
 #_* MOOSEHERDER VARIABLES - START
 !include common_load_time.i
 !include common_plas_props.i
+!include common_elas_props.i
 simName = hole2d_plas
 #** MOOSEHERDER VARIABLES - END
 #-------------------------------------------------------------------------
@@ -110,7 +111,7 @@ simName = hole2d_plas
     []
 []
 
-!include common_solver.i
+!include common_solver_smp.i
 
 [Postprocessors]
     [react_y_top]

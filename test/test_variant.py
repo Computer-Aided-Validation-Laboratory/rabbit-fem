@@ -86,17 +86,12 @@ def test_mpi_launch_size(
     assert cli.mpi_launch_size() == expected
 
 
-def test_format_cli_args_serial_falls_back_to_ilu(
+def test_format_cli_args_serial_honors_input_solver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Serial builds get ILU since their PETSc has no Hypre."""
+    """Serial builds use the solver selected by the input file."""
     monkeypatch.setattr(cli, "is_mpi_binary", lambda: False)
-    assert cli.format_cli_args(["sim.i"]) == [
-        "-i",
-        "sim.i",
-        "-pc_type",
-        "ilu",
-    ]
+    assert cli.format_cli_args(["sim.i"]) == ["-i", "sim.i"]
 
 
 def test_format_cli_args_mpi_keeps_input_hypre(
@@ -117,7 +112,7 @@ def test_format_cli_args_explicit_pc_type_wins(
     assert "jacobi" in args
 
 
-def test_format_cli_args_info_flags_skip_ilu(
+def test_format_cli_args_info_flags_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Informational flags must not gain solver arguments."""
@@ -160,10 +155,10 @@ def test_run_rabbit_refuses_multirank_serial(
         simulations.run_rabbit("sim.i", cwd=tmp_path)
 
 
-def test_run_rabbit_serial_injects_ilu(
+def test_run_rabbit_preserves_input_solver(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Serial run_rabbit adds ILU; MPI leaves the command alone."""
+    """The runner leaves solver selection to the input in both variants."""
     fake_bin = tmp_path / "rabbit"
     fake_bin.write_bytes(b"fake")
     fake_bin.chmod(0o755)
@@ -179,7 +174,7 @@ def test_run_rabbit_serial_injects_ilu(
     )
     monkeypatch.setattr(cli, "is_mpi_binary", lambda: False)
     simulations.run_rabbit("sim.i", cwd=tmp_path)
-    assert "-pc_type" in seen[0] and "ilu" in seen[0]
+    assert "-pc_type" not in seen[0]
 
     seen.clear()
     monkeypatch.setattr(cli, "is_mpi_binary", lambda: True)

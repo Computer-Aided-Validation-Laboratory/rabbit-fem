@@ -44,22 +44,41 @@ def test_dataset_paths_exist() -> None:
     assert dogbone_geo_path(EDims.TWOD).is_file()
     assert dogbone_geo_path(EDims.THREED).is_file()
     assert dogbone_input_path(EDims.TWOD).is_file()
+    assert dogbone_input_path(EDims.TWOD, mpi=True).is_file()
     assert dogbone_input_path(EDims.THREED).is_file()
+    assert dogbone_input_path(EDims.THREED, mpi=True).is_file()
     assert dogbone_input_path(EDims.THREED, is_plastic=True).is_file()
+    assert dogbone_input_path(EDims.THREED, is_plastic=True, mpi=True).is_file()
 
     assert monoblock_geo_path().is_file()
     assert monoblock_input_path().is_file()
+    assert monoblock_input_path(mpi=True).is_file()
 
     assert plate_tensile_geo_path("hole2d").is_file()
     assert plate_tensile_geo_path("hole3d").is_file()
     assert plate_tensile_geo_path("notch2d").is_file()
     assert plate_tensile_geo_path("notch3d").is_file()
     assert plate_tensile_input_path("hole2d_elas").is_file()
+    assert plate_tensile_input_path("hole2d_elas", mpi=True).is_file()
     assert plate_tensile_input_path("hole3d_elas").is_file()
 
     assert stc_geo_path().is_file()
     assert stc_input_path("stc_therm_unifhf_wrad_std_ad").is_file()
+    assert stc_input_path("stc_therm_unifhf_wrad_std_ad", mpi=True).is_file()
     assert stc_data_path("ss316L_density_K.csv").is_file()
+
+
+def test_simulation_solver_includes_are_single_level() -> None:
+    """Every example has an MPI variant and common includes do not recurse."""
+    sims = Path(__file__).resolve().parents[1] / "src" / "rabbit" / "sims"
+    for folder in sims.iterdir():
+        if not folder.is_dir():
+            continue
+        for input_file in folder.glob("*.i"):
+            if input_file.name.startswith("common_") or "solver" in input_file.stem:
+                assert "!include" not in input_file.read_text()
+            elif not input_file.stem.endswith("_mpi"):
+                assert input_file.with_name(f"{input_file.stem}_mpi.i").is_file()
 
     for case in MFEM_CASES:
         assert mfem_input_path(case).is_file()

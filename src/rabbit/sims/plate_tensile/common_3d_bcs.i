@@ -12,7 +12,7 @@
     [bottom_x]
         type = DirichletBC
         variable = disp_x
-        boundary = 'bc-bot-mid'
+        boundary = 'bc-bot-point-back bc-bot-point-front'
         value = 0.0
     []
     [bottom_y]
@@ -24,7 +24,7 @@
     [bottom_z]
         type = DirichletBC
         variable = disp_z
-        boundary = 'bc-bot-mid'
+        boundary = 'bc-bot-point-back'
         value = 0.0
     []
     [top_y]

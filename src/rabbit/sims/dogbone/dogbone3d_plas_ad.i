@@ -104,36 +104,7 @@ ss316LHardMod = 5000e6     # Pa
     []
 []
 
-[Preconditioning]
-    [SMP]
-        type = SMP
-        full = true
-    []
-[]
-
-[Executioner]
-    type = Transient
-
-    solve_type = 'NEWTON'
-    petsc_options = '-snes_converged_reason'
-    petsc_options_iname = '-pc_type -ksp_type -ksp_gmres_restart'
-    petsc_options_value = 'lu gmres 200'
-
-    l_max_its = 100
-    l_tol = 1e-6
-
-    nl_max_its = 50
-    nl_rel_tol = 1e-6
-    nl_abs_tol = 1e-6
-
-    end_time = ${endTime}
-    dt = ${timeStep}
-
-    [Predictor]
-        type = SimplePredictor
-        scale = 1
-    []
-[]
+!include common_dogbone_plastic_solver_smp.i
 
 [Postprocessors]
     [react_y_top]

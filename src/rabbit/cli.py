@@ -91,12 +91,6 @@ def format_cli_args(raw_args: list[str]) -> list[str]:
             else:
                 formatted.append(arg)
 
-    info_flags = ("-h", "--help", "-v", "--version", "--docs", "--show-capabilities", "--registry")
-    # Serial builds (PETSc MPIUNI) have no Hypre: the packaged .i files
-    # request 'hypre boomeramg', so fall back to ILU unless overridden.
-    if not is_mpi_binary() and not any(arg in info_flags for arg in raw_args) and not any("-pc_type" in arg for arg in formatted):
-        formatted.extend(["-pc_type", "ilu"])
-
     return formatted
 
 

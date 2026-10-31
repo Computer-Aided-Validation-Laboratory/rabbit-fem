@@ -168,31 +168,7 @@ elem_order = 'SECOND'
     []
 []
 
-[Executioner]
-    type = Transient
-
-    # Best options for thermal solve
-    solve_type = 'NEWTON'
-    petsc_options = '-snes_converged_reason'
-    petsc_options_iname = '-pc_type -pc_hypre_type -ksp_type -ksp_gmres_restart'
-    petsc_options_value = ' hypre    boomeramg      gmres     200'
-
-    l_max_its = 200
-    l_tol = 1e-6
-
-    nl_max_its = 50
-    nl_rel_tol = 1e-6
-    nl_abs_tol = 1e-6
-
-    end_time= ${endTime}
-    dt = ${timeStep}
-
-    # [Predictor]
-    #     type = SimplePredictor
-    #     scale = 1
-    # []
-
-[]
+!include common_stc_solver_smp.i
 
 [Postprocessors]
     [temp_max]

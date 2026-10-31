@@ -41,7 +41,7 @@ simName = notch2d_elas
 
 !include common_2d_bcs.i
 !include common_elas_materials.i
-!include common_solver.i
+!include common_solver_smp.i
 
 [Postprocessors]
     [react_y_top]

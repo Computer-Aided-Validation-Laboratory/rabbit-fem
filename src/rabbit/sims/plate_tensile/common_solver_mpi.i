@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------------
 
 [Preconditioning]
-    [smp]
+    [SMP]
         type = SMP
         full = true
     []
@@ -18,22 +18,34 @@
 [Executioner]
     type = Transient
 
+    # Small plate meshes: measured LU faster than ILU and Hypre.
+    # MPI wheel; LU is supported at one or more ranks.
+    automatic_scaling = false
     solve_type = 'NEWTON'
     petsc_options = '-snes_converged_reason'
-    petsc_options_iname = '-pc_type -pc_hypre_type'
-    petsc_options_value = 'hypre boomeramg'
-    line_search = 'none'
+    petsc_options_iname = '-pc_type -ksp_type -ksp_gmres_restart'
+    petsc_options_value = 'lu gmres 30'
 
-    l_max_its = 1000
+    l_max_its = 100
     l_tol = 1e-6
 
     nl_max_its = 50
     nl_rel_tol = 1e-6
     nl_abs_tol = 1e-6
 
-    start_time = 0.0
     end_time = ${endTime}
     dt = ${timeStep}
+    dtmin = 1e-5
+    dtmax = ${timeStep}
+
+    [TimeStepper]
+        type = IterationAdaptiveDT
+        dt = ${timeStep}
+        optimal_iterations = 8
+        iteration_window = 2
+        growth_factor = 1.2
+        cutback_factor = 0.5
+    []
 
     [Predictor]
         type = SimplePredictor

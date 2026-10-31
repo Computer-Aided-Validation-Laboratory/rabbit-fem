@@ -34,7 +34,7 @@ simName = hole3d_elas
 
 !include common_3d_bcs.i
 !include common_elas_materials.i
-!include common_solver.i
+!include common_solver_smp.i
 
 [Postprocessors]
     [react_y_top]

@@ -140,11 +140,15 @@ Run multi-rank with the MPI variant (Linux only, see above):
 mpirun -n 4 rabbit simulation.i
 ```
 
-The packaged thermo-mechanical cubes have separate solver inputs. The regular
-`cube_thermomech_*.i` files use ILU/GMRES for the serial wheel; the
-`cube_thermomech_*_mpi.i` files use Hypre/GMRES for the MPI wheel. The meshes
-are small, so either one MPI rank with four threads or four MPI ranks can be
-used to check the MPI solver. For one rank with four threads:
+The packaged MOOSE examples in `src/rabbit/sims/` have separate solver inputs.
+Regular `.i` files select SMP solver settings; `_mpi.i` files select MPI
+settings. Each solver include contains its complete preconditioner and
+executioner setup. The CLI and Python runner honor that selection without
+injecting a PETSc preconditioner. MFEM examples require the MPI wheel.
+
+The cube SMP inputs use ILU/GMRES, while the MPI inputs use Hypre/GMRES.
+The meshes are small, so either one MPI rank with four threads or four MPI
+ranks can be used to check the MPI solver. For one rank with four threads:
 
 ```bash
 rabbit cube_thermomech_HEX8.i --n-threads=4
@@ -153,7 +157,8 @@ rabbit cube_thermomech_HEX8_mpi.i --n-threads=4
 
 For four ranks, use `mpirun -n 4 rabbit cube_thermomech_HEX8_mpi.i`.
 In Python, select the MPI input with
-`cube_thermomech_input_path(EElemType.HEX8, mpi=True)`.
+`cube_thermomech_input_path(EElemType.HEX8, mpi=True)`; the dogbone,
+plate tensile, monoblock, and STC input path helpers also accept `mpi=True`.
 
 ### 2. Python Dataset and Simulation Runner API
 
