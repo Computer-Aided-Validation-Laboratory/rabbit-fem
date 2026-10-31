@@ -1,6 +1,28 @@
 # OpenCode CI Fixes Log
 
-## 2026-10-06 — Release workflow gains MPICH; MPICH workflow renamed (PR #11)
+## 2026-10-31 — Windows SMP Threading Support and Windows MPI Proof Deck (PR #15)
+
+### 1. Windows MPI multi-rank proof missing `mpi=True`
+- **Root cause**: In `.github/workflows/windows_mpi_build_and_test.yml` line 204, `cube_thermomech_input_path(EElemType.HEX8)` was called without `mpi=True`. This selected the serial deck `cube_thermomech_HEX8.i`, which includes `common_cube_solver_smp.i` with `-pc_type ilu`. On Windows MPI, PETSc does not include MUMPS or SuperLU_DIST (which require a Fortran toolchain), so PETSc cannot factorize distributed `mpiaij` matrices with ILU, raising `[0]PETSC ERROR: Could not locate a solver type for factorization type ILU and matrix type mpiaij.`
+- **Why the fix addresses the root cause**: Adding `mpi=True` resolves `cube_thermomech_HEX8_mpi.i`, which includes `common_cube_solver_mpi.i` with `-pc_type hypre -pc_hypre_type boomeramg`. Hypre is compiled and supported in the Windows MS-MPI PETSc build. Also updated the Linux MPI step in `.github/workflows/smoke.yml` to specify `mpi=True` for consistency.
+- **Platform-specific considerations**: Windows MS-MPI uses Hypre algebraic multigrid rather than MUMPS/SuperLU_DIST for parallel preconditioning.
+- **Files changed**: `.github/workflows/windows_mpi_build_and_test.yml`, `.github/workflows/smoke.yml`.
+- **How the fix can be verified**: `cube_thermomech_input_path(EElemType.HEX8, mpi=True)` resolves `cube_thermomech_HEX8_mpi.i`; CI Windows MPI multi-rank proof succeeds with 2 ranks.
+- **Remaining uncertainty**: None.
+
+### 2. Windows SMP Threading Support (`--n-threads=N`)
+- **Root cause**: Running `rabbit-opt.exe --n-threads=2` aborted in `moose/framework/src/base/MooseApp.C:1100` (`You specified --n-threads > 1, but there is no threading model active!`) because libMesh configure in `scripts/install_dependencies_windows.ps1` had hardcoded `--with-thread-model=none` during the initial Windows port baseline.
+- **Why the fix addresses the root cause**: Configured libMesh with `--with-thread-model=pthread --enable-pthreads --disable-openmp`. Zig's C/C++ runtime provides a static winpthreads implementation that maps POSIX threads directly to Win32 thread APIs without runtime DLL baggage (`libwinpthread-1.dll` is not dynamically imported; PE import audit confirms only `KERNEL32.dll` and UCRT).
+- **Platform-specific considerations**: Zig does not bundle `libomp` on Windows, so OpenMP cannot be used directly with Zig. POSIX threads via Zig's native MinGW winpthreads runtime provide full SMP thread parallelism with zero DLL overhead.
+- **Files changed**:
+  - `scripts/install_dependencies_windows.ps1` (libMesh configure flags)
+  - `.github/workflows/smoke.yml` (Windows serial wheel SMP verification with `--n-threads=2`)
+  - `test/test_simulations.py` (added `test_smp_threads` regression test)
+  - `README.md` (documented Windows `--n-threads=N` support)
+  - `dev/log_windows_smp.md` (comprehensive documentation log)
+- **How the fix can be verified**: Tested libMesh configure with pthread model; running `rabbit-opt.exe --n-threads=2` completes solve cleanly; `pytest test/test_simulations.py -k test_smp_threads` passes.
+- **Remaining uncertainty**: None.
+
 
 - Request: publish `rabbit-fem-mpich` from the release workflow and
   name the MPICH workflows `MPICH/MFEM, Linux:` like the MPI ones.

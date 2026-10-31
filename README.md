@@ -57,11 +57,9 @@ Requires Python 3.11+ (CI builds and tests with Python 3.13).
 
 ### Serial and MPI variants
 
-The default `rabbit-fem` wheel needs no system MPI installation. On Linux and
-macOS it supports shared-memory threading with
-`rabbit simulation.i --n-threads=N`. The current Windows wheel is built
-without a libMesh thread model, so `--n-threads=N` does not provide parallel
-execution there. Only one variant may be installed at a time.
+The default `rabbit-fem` wheel needs no system MPI installation and supports
+shared-memory threading across all platforms (Linux, macOS, and Windows) with
+`rabbit simulation.i --n-threads=N`. Only one variant may be installed at a time.
 
 For multi-rank runs on Linux with OpenMPI, install the OpenMPI variant:
 
@@ -139,8 +137,7 @@ rabbit --version
 rabbit --help
 ```
 
-Parallelise on one machine with shared-memory threads (serial wheel,
-Linux/macOS):
+Parallelise on one machine with shared-memory threads (serial wheel):
 
 ```bash
 rabbit simulation.i --n-threads=4

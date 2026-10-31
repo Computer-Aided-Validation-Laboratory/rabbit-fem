@@ -201,7 +201,7 @@ jobs:
       - name: "Windows MPI: mpiexec multi-rank proof"
         run: |
           $ProofPython = ".venv\Scripts\python.exe"
-          $MpiInput = & $ProofPython -c "from rabbit.sims import cube_thermomech_input_path, EElemType; print(cube_thermomech_input_path(EElemType.HEX8))"
+          $MpiInput = & $ProofPython -c "from rabbit.sims import cube_thermomech_input_path, EElemType; print(cube_thermomech_input_path(EElemType.HEX8, mpi=True))"
           if ($LASTEXITCODE -ne 0) { throw "Could not resolve HEX8 input path" }
           Remove-Item Env:\MOOSE_DIR -ErrorAction SilentlyContinue
           Remove-Item Env:\PETSC_DIR -ErrorAction SilentlyContinue
