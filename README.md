@@ -140,6 +140,21 @@ Run multi-rank with the MPI variant (Linux only, see above):
 mpirun -n 4 rabbit simulation.i
 ```
 
+The packaged thermo-mechanical cubes have separate solver inputs. The regular
+`cube_thermomech_*.i` files use ILU/GMRES for the serial wheel; the
+`cube_thermomech_*_mpi.i` files use Hypre/GMRES for the MPI wheel. The meshes
+are small, so either one MPI rank with four threads or four MPI ranks can be
+used to check the MPI solver. For one rank with four threads:
+
+```bash
+rabbit cube_thermomech_HEX8.i --n-threads=4
+rabbit cube_thermomech_HEX8_mpi.i --n-threads=4
+```
+
+For four ranks, use `mpirun -n 4 rabbit cube_thermomech_HEX8_mpi.i`.
+In Python, select the MPI input with
+`cube_thermomech_input_path(EElemType.HEX8, mpi=True)`.
+
 ### 2. Python Dataset and Simulation Runner API
 
 `rabbit-fem` packages simulation files and provides helpers to locate inputs, generate meshes with Gmsh, and execute solves:

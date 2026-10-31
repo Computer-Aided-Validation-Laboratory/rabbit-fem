@@ -39,6 +39,7 @@ def test_dataset_paths_exist() -> None:
     """Verify all simulation dataset accessors point to existing files."""
     for elem in EElemType:
         assert cube_thermomech_input_path(elem).is_file()
+        assert cube_thermomech_input_path(elem, mpi=True).is_file()
 
     assert dogbone_geo_path(EDims.TWOD).is_file()
     assert dogbone_geo_path(EDims.THREED).is_file()

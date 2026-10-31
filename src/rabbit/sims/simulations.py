@@ -58,20 +58,23 @@ def _sim_path(*parts: str) -> Path:
 # ------------------------------------------------------------------------------
 
 
-def cube_thermomech_input_path(elem_type: EElemType) -> Path:
+def cube_thermomech_input_path(elem_type: EElemType, *, mpi: bool = False) -> Path:
     """Get path to the cube thermo-mechanical MOOSE input file (.i).
 
     Parameters
     ----------
     elem_type : EElemType
         Element topology for the benchmark.
+    mpi : bool, default False
+        Select the MPI solver input instead of the serial/SMP input.
 
     Returns
     -------
     Path
         Path to the requested .i simulation file.
     """
-    filename = f"cube_thermomech_{elem_type.value}.i"
+    suffix = "_mpi" if mpi else ""
+    filename = f"cube_thermomech_{elem_type.value}{suffix}.i"
     target = _sim_path("cube_thermomech", filename)
     if not target.is_file():
         raise DataSetError(f"Cube simulation file not found: {target}")

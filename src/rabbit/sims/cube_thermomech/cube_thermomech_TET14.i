@@ -18,3 +18,5 @@ eType = TET14
 
 !include common_cube_params.i
 !include common_cube_physics.i
+
+!include common_cube_solver_smp.i
