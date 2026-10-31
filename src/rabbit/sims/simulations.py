@@ -459,6 +459,8 @@ def run_rabbit(
             "Install the MPI variant instead: pip install rabbit-fem-mpi"
         )
     env = dict(os.environ)
+    if env.get("RABBIT_MPI_IMPL") == "mpich":
+        env.setdefault("UCX_TLS", "tcp,self,sm")
     if lib_dir.is_dir():
         curr_ld = env.get("LD_LIBRARY_PATH", "")
         env["LD_LIBRARY_PATH"] = (

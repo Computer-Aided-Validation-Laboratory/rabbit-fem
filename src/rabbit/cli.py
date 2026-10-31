@@ -115,6 +115,8 @@ def main() -> None:
 
     lib_dir = get_library_dir()
     env = dict(os.environ)
+    if env.get("RABBIT_MPI_IMPL") == "mpich":
+        env.setdefault("UCX_TLS", "tcp,self,sm")
     if lib_dir.is_dir():
         curr_ld = env.get("LD_LIBRARY_PATH", "")
         if curr_ld:

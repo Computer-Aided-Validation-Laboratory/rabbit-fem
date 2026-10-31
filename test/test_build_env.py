@@ -512,3 +512,26 @@ def test_linux_mpich_pins_suffixed_compilers_for_petsc(
     assert "--with-cxx=mpicxx.mpich" in cmd
     assert "--with-fc=mpif90.mpich" in cmd
     assert "--with-mpiexec=mpiexec.mpich" in cmd
+
+
+def test_run_tests_sets_ucx_tls_for_mpich(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run_tests sets UCX_TLS default when RABBIT_MPI_IMPL=mpich."""
+    import subprocess
+    from build.common import run_tests
+
+    captured_env: dict[str, str] = {}
+
+    def fake_run(cmd, cwd=None, env=None, check=True):
+        nonlocal captured_env
+        captured_env = dict(env or {})
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setenv("RABBIT_MPI_IMPL", "mpich")
+    monkeypatch.delenv("UCX_TLS", raising=False)
+
+    run_tests(tmp_path)
+    assert captured_env.get("UCX_TLS") == "tcp,self,sm"
+

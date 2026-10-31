@@ -31,6 +31,17 @@
 - **How the fix can be verified**: Validated via PowerShell script that `Out-String` yields scalar boolean `-notmatch` evaluation; CI Windows smoke test passes without false failure.
 - **Remaining uncertainty**: None.
 
+### 4. Linux MPICH test suite runner abort on IB-less runners (exit code 15)
+- **Root cause**: In CI run `41205911966`, `MPICH: Run test suite` failed because all tests running `rabbit` exited with status 15 (SIGTERM). Ubuntu's MPICH package is built as `ch4:ucx`. On Azure runner VMs where InfiniBand hardware probes fail (`ibv_create_srq() failed`), any `MPI_Init` call without `UCX_TLS=tcp,self,sm` immediately aborts. While `scripts/build/linux.py` and `smoke.yml` had exported this variable for build-time and smoke-time steps, `build_rabbit.py --test` calls `scripts/build/common.py:run_tests()` directly in a separate step without going through `get_linux_tool_env()`, and the job environment in `linux_mpich_build_and_test.yml` was missing `UCX_TLS`.
+- **Why the fix addresses the root cause**:
+  - `scripts/build/common.py:run_tests()` now copies `os.environ` and applies `test_env.setdefault("UCX_TLS", "tcp,self,sm")` whenever `RABBIT_MPI_IMPL == "mpich"`.
+  - `.github/workflows/linux_mpich_build_and_test.yml` includes `UCX_TLS: "tcp,self,sm"` at the job-level `env:`.
+  - `src/rabbit/sims/simulations.py:run_rabbit()` and `src/rabbit/cli.py:main()` apply `env.setdefault("UCX_TLS", "tcp,self,sm")` when `RABBIT_MPI_IMPL == "mpich"`, protecting end users and tests calling the runner.
+- **Platform-specific considerations**: Scoped strictly to MPICH on Linux (`RABBIT_MPI_IMPL == "mpich"`). OpenMPI is left unconstrained so native OpenMPI UCX/transport selection is unaffected.
+- **Files changed**: `scripts/build/common.py`, `.github/workflows/linux_mpich_build_and_test.yml`, `src/rabbit/sims/simulations.py`, `src/rabbit/cli.py`, `test/test_build_env.py`, `dev/log_opencode_fixes.md`.
+- **How the fix can be verified**: Added unit test `test_run_tests_sets_ucx_tls_for_mpich` in `test/test_build_env.py` (passes); CI MPICH test suite will run without exit status 15 aborts.
+- **Remaining uncertainty**: None.
+
 
 - Request: publish `rabbit-fem-mpich` from the release workflow and
   name the MPICH workflows `MPICH/MFEM, Linux:` like the MPI ones.
