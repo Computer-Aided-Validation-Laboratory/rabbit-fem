@@ -1,8 +1,23 @@
-# Rabbit Finite Element Modelling
+<p align="center">
+    <img src="https://raw.githubusercontent.com/Computer-Aided-Validation-Laboratory/rabbit-fem/main/images/logo_rabbitfem.png" alt="Rabbit FEM Logo" width="620">
+</p>
+
+<p align="center"><strong>An easy to install, pre-compiled and portable MOOSE distribution for thermo-mechanical finite element simulation.</strong></p>
+
+<p align="center">
+    <a href="https://pypi.org/project/rabbit-fem/"><img src="https://img.shields.io/pypi/v/rabbit-fem?label=PyPI" alt="PyPI version"></a>
+    <a href="https://pypi.org/project/rabbit-fem/"><img src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white" alt="Supported Python versions"></a>
+    <a href="https://ziglang.org/download/"><img src="https://img.shields.io/badge/Zig-0.16.0-F7A41D?logo=zig&logoColor=white" alt="Zig version"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/linux_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/linux_build_and_test.yml?branch=main&label=Linux" alt="Linux Tests"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/macos_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/macos_build_and_test.yml?branch=main&label=macOS" alt="macOS Tests"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/windows_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/windows_build_and_test.yml?branch=main&label=Windows" alt="Windows Tests"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/mpi_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/mpi_build_and_test.yml?branch=main&label=MPI" alt="MPI Tests"></a>
+    <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Computer-Aided-Validation-Laboratory/rabbit-fem" alt="LGPL-2.1 license"></a>
+</p>
 
 `rabbit-fem` is a lightweight, standalone Python distribution of the [MOOSE](https://mooseframework.inl.gov/) (Multiphysics Object-Oriented Simulation Environment) finite element framework, tailored specifically for **thermal**, **solid mechanics**, and **contact** simulation.
 
-Packaged as a self-contained Python wheel (~60 MB), `rabbit-fem` provides a drop-in `rabbit` command line executable and Python dataset API that runs MOOSE simulations without requiring external MOOSE or libMesh system installations.
+Packaged as a self-contained Python wheel, `rabbit-fem` provides a drop-in `rabbit` command line executable and Python dataset API that runs MOOSE simulations without requiring external MOOSE or libMesh system installations.
 
 ---
 
@@ -38,7 +53,7 @@ pip install dist/rabbit_fem-*.whl
 uv pip install dist/rabbit_fem-*.whl
 ```
 
-Requires Python 3.10+ (CI builds and tests with Python 3.13).
+Requires Python 3.11+ (CI builds and tests with Python 3.13).
 
 ### Serial and MPI variants
 
@@ -47,7 +62,7 @@ system MPI installation and parallelises on one machine with
 `rabbit simulation.i --n-threads=N`. Only one variant may be installed
 at a time.
 
-For multi-rank runs, install the MPI variant instead (Linux only):
+For multi-rank runs with OpenMPI, install the OpenMPI variant (Linux only):
 
 ```bash
 pip install rabbit-fem-mpi
@@ -57,18 +72,37 @@ pip install rabbit-fem-mpi
 mpirun -n 4 rabbit simulation.i
 ```
 
-The MPI variant additionally ships the `MFEM` finite element backend
+The MPI variants additionally ship the `MFEM` finite element backend
 (parallel Nédélec/Maxwell and diffusion problems via `MFEMProblem`;
 see `src/rabbit/sims/mfem/`). Upstream MOOSE supports MFEM only with
 MPI, so the serial wheel excludes it.
 
+For clusters and systems whose MPI is MPICH rather than OpenMPI,
+install the MPICH variant instead (Linux only):
+
+```bash
+pip install rabbit-fem-mpich
+```
+
+```bash
+mpiexec.mpich -n 4 rabbit simulation.i
+```
+
+The explicit `mpiexec.mpich`/`mpirun.mpich` names keep working
+regardless of the machine's MPI default (`update-alternatives`);
+on MPICH-only systems bare `mpirun` resolves to the same launcher.
+On machines without working InfiniBand, export
+`UCX_TLS=tcp,self,sm` before running, otherwise MPICH's UCX layer
+can abort during `MPI_Init` (`ibv_create_srq() failed`).
+
 ### Runtime system requirements
 
 The serial wheel is fully self-contained on all platforms. The MPI
-variant links the MPI ecosystem at runtime, which must be installed
+variants link the MPI ecosystem at runtime, which must be installed
 separately (the launcher version must match the runtime):
 
-- **Linux (MPI variant)**: OpenMPI runtime — `sudo apt-get install -y openmpi-bin`
+- **Linux (OpenMPI variant / `rabbit-fem-mpi`)**: OpenMPI runtime — `sudo apt-get install -y openmpi-bin`
+- **Linux (MPICH variant / `rabbit-fem-mpich`)**: MPICH runtime — `sudo apt-get install -y mpich`
 
 ---
 
@@ -204,7 +238,7 @@ Upstream MOOSE sources are pinned (`moose_version.txt` plus the `moose_deps.txt`
 
 - **OS**: Linux x86_64 (Ubuntu 22.04+ or compatible)
 - **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`, `libtirpc-dev`, `libomp-dev`, `libglu1-mesa`
-- **Python**: Python 3.10+ with [`uv`](https://docs.astral.sh/uv/)
+- **Python**: Python 3.11+ with [`uv`](https://docs.astral.sh/uv/)
 
 ```bash
 sudo apt-get update && sudo apt-get install -y \
@@ -246,7 +280,7 @@ uv run python build_rabbit.py --wheel --test
 
 #### Prerequisites (Windows)
 
-1. **Python 3.10+** (with [`uv`](https://docs.astral.sh/uv/)):
+1. **Python 3.11+** (with [`uv`](https://docs.astral.sh/uv/)):
    ```powershell
    winget install astral-sh.uv
    ```
@@ -329,7 +363,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps
 
 - **OS**: macOS on Apple Silicon (arm64) or Intel (x86_64)
 - **Homebrew packages**: `open-mpi`, `gcc`, `llvm`, `libomp`, `libpng`, `hdf5-mpi`, `bison`, `flex`, `pkgconf`, `cmake`
-- **Python**: Python 3.10+ with [`uv`](https://docs.astral.sh/uv/)
+- **Python**: Python 3.11+ with [`uv`](https://docs.astral.sh/uv/)
 
 ```bash
 brew install open-mpi gcc llvm libomp libpng hdf5-mpi bison flex pkgconf cmake

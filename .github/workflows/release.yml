@@ -529,6 +529,132 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  build-windows-mpi:
+    name: "MPI, Windows: Build and Verify Wheel"
+    runs-on: windows-latest
+    timeout-minutes: 360
+    env:
+      RABBIT_MPI: "1"
+
+    steps:
+      - name: "Windows MPI: Configure git long paths"
+        run: git config --global core.longpaths true
+
+      - name: "Windows MPI: Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: "Windows MPI: Set up MSYS2"
+        uses: msys2/setup-msys2@v2
+        with:
+          location: 'C:\msys64'
+          msystem: MSYS
+          path-type: inherit
+          update: false
+          install: >-
+            make
+            diffutils
+            patch
+            python
+            m4
+            git
+            cmake
+
+      - name: "Windows MPI: Install system MS-MPI"
+        uses: mpi4py/setup-mpi@v1
+        with:
+          mpi: msmpi
+
+      - name: "Windows MPI: Set up uv"
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: "Windows MPI: Set up Python"
+        run: |
+          uv python install 3.13
+          uv venv .venv
+
+      # Wheel and dependency caches use the exact same keys and paths as
+      # windows_mpi_build_and_test.yml, so a release on a previously built
+      # tree restores everything and only runs tests and packaging. This
+      # job never saves caches; that workflow owns population.
+      - name: "Windows MPI: Restore wheel cache"
+        uses: actions/cache/restore@v4
+        id: wheel-windows-mpi-cache
+        with:
+          path: |
+            dist
+            src/rabbit/bin
+            src/rabbit/share
+          key: rabbit-fem-wheel-Windows-mpi-${{ hashFiles('src/**', 'include/**', 'Makefile', 'pyproject.toml', 'moose_version.txt', 'moose_deps.txt', 'scripts/**', 'build_rabbit.py', 'patches/**') }}
+
+      # NOTE: dependency caches use exact keys with no restore-keys prefix
+      # fallback. A key miss means the recipe changed, so any older tree
+      # would be stale; the build scripts skip stages whose artifacts already
+      # exist, which would silently keep the stale tree (and re-save it under
+      # the new key - see the Sep-28 X11 entry in dev/log_opencode_fixes.md).
+      # A miss therefore rebuilds from scratch, which is what a recipe change
+      # requires.
+      - name: "Windows MPI: Restore PETSc cache"
+        if: steps.wheel-windows-mpi-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: petsc-windows-mpi-cache
+        with:
+          path: moose/petsc/arch-windows-opt
+          key: windows-mpi-petsc-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+
+      - name: "Windows MPI: Restore libMesh cache"
+        if: steps.wheel-windows-mpi-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: libmesh-windows-mpi-cache
+        with:
+          path: moose/libmesh/installed
+          key: windows-mpi-libmesh-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+
+      - name: "Windows MPI: Restore WASP cache"
+        if: steps.wheel-windows-mpi-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: wasp-windows-mpi-cache
+        with:
+          path: |
+            moose/framework/contrib/wasp/install
+            moose/framework/contrib/wasp/build
+            moose/framework/contrib/hit/hit.exe
+          key: windows-mpi-wasp-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+
+      - name: "Windows MPI: Restore MOOSE Config cache"
+        if: steps.wheel-windows-mpi-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        id: mooseconfig-windows-mpi-cache
+        with:
+          path: moose/framework/include/base/MooseConfig.h
+          key: windows-mpi-mooseconfig-${{ hashFiles('moose_version.txt', 'moose_deps.txt', 'scripts/install_dependencies_windows.ps1', 'scripts/windows_wrappers/**', 'patches/**') }}
+
+      - name: "Windows MPI: Build MOOSE dependencies and Rabbit"
+        if: steps.wheel-windows-mpi-cache.outputs.cache-hit != 'true'
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps1 -SkipTests
+
+      - name: "Windows MPI: Package standalone wheel"
+        if: steps.wheel-windows-mpi-cache.outputs.cache-hit != 'true'
+        run: |
+          uv run python build_rabbit.py --wheel-only
+
+      - name: "Windows MPI: Run test suite"
+        run: |
+          uv run python build_rabbit.py --test
+
+      - name: "Windows MPI: Upload wheel artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: rabbit-fem-windows-mpi-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
   build-macos:
     name: "macOS: Build and Verify Wheel"
     runs-on: macos-15
