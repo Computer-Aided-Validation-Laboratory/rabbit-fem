@@ -1,9 +1,8 @@
 name: "MPI, Windows: Build Wheel and Test"
 
 # Windows MPI variant of rabbit-fem (system MS-MPI, no MFEM).
-# First-go shape: build job (own windows-mpi caches, RABBIT_MPI=1) +
-# test suite + an mpiexec -n 2 HEX8 proof. Compat/floor/mamba/smoke
-# legs are deliberately deferred until the MPI build itself is green.
+# Build job plus clean-machine smoke of the installed wheel. Both prove
+# a two-rank HEX8 solve; the smoke job also checks wheel packaging.
 on:
   push:
     branches: ["main"]
@@ -253,3 +252,13 @@ jobs:
             moose/petsc/arch-windows-opt/externalpackages/git.hypre/src/config.log
             moose/libmesh/config.log
           if-no-files-found: ignore
+
+  smoke-windows-mpi:
+    name: "MPI, Windows: Clean-machine wheel smoke test"
+    needs: windows-mpi-build-and-test
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: windows
+      artifact: rabbit-fem-windows-mpi-wheel
+      runner: windows-latest
+      mpi: true

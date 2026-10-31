@@ -77,6 +77,12 @@ jobs:
           name: ${{ inputs.artifact }}
           path: dist/
 
+      - name: "Smoke (windows MPI): Install MS-MPI runtime"
+        if: inputs.platform == 'windows' && inputs.mpi
+        uses: mpi4py/setup-mpi@v1
+        with:
+          mpi: msmpi
+
       - name: "Smoke (macos): Install MPI runtime libraries"
         if: inputs.platform == 'macos'
         env:
@@ -230,9 +236,8 @@ jobs:
             ls -la /tmp/rabbit-smoke-mfem-mpi-run/OutputData/CurlCurl/*.csv
             echo "MFEM MPI smoke solve OK"
           else
-            # Serial wheel: prove SMP threading parallelises. This step
-            # runs on Linux/macOS only (the whole step is skipped on
-            # Windows, whose libMesh builds with --with-thread-model=none).
+            # Serial wheel: prove SMP threading on Linux/macOS. Windows
+            # libMesh currently builds with --with-thread-model=none.
             mkdir -p /tmp/rabbit-smoke-smp-run && cd /tmp/rabbit-smoke-smp-run
             env -u MOOSE_DIR -u PETSC_DIR -u LIBMESH_DIR -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH /tmp/rabbit-smoke/bin/python -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1', '--n-threads=2']); assert r.returncode == 0; print('SMP smoke solve OK')"
             ls -la /tmp/rabbit-smoke-smp-run/*.e
@@ -254,23 +259,52 @@ jobs:
         run: |
           uv venv "$env:RUNNER_TEMP\rabbit-smoke" --python ${{ inputs.python-version }}
           $SmokePython = "$env:RUNNER_TEMP\rabbit-smoke\Scripts\python.exe"
-          $Wheel = (Get-ChildItem dist/*.whl | Select-Object -First 1).FullName
+          $Wheels = @(Get-ChildItem dist/*.whl)
+          if ($Wheels.Count -ne 1) { throw "Expected exactly one wheel in the smoke artifact, found $($Wheels.Count)" }
+          $Wheel = $Wheels[0].FullName
           uv pip install --python $SmokePython $Wheel
+          if ($LASTEXITCODE -ne 0) { throw "Clean wheel install failed" }
           if ("${{ inputs.run-gold }}" -eq "true") {
             uv pip install --python $SmokePython pytest numpy netCDF4
+            if ($LASTEXITCODE -ne 0) { throw "Gold test dependencies failed to install" }
           }
           Remove-Item Env:\MOOSE_DIR -ErrorAction SilentlyContinue
           Remove-Item Env:\PETSC_DIR -ErrorAction SilentlyContinue
           Remove-Item Env:\LIBMESH_DIR -ErrorAction SilentlyContinue
+          $env:RABBIT_SMOKE_MPI = "${{ inputs.mpi }}"
+          & $SmokePython -c "import os; from rabbit.cli import is_mpi_binary; assert is_mpi_binary() == (os.environ['RABBIT_SMOKE_MPI'].lower() == 'true')"
+          if ($LASTEXITCODE -ne 0) { throw "Installed wheel has the wrong MPI variant marker" }
           & "$env:RUNNER_TEMP\rabbit-smoke\Scripts\rabbit.exe" --version
           if ($LASTEXITCODE -ne 0) { throw "Smoke rabbit --version failed" }
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\rabbit-smoke-run" | Out-Null
           Push-Location "$env:RUNNER_TEMP\rabbit-smoke-run"
           try {
-            & $SmokePython -c "from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Smoke solve OK')"
+            & $SmokePython -c "import os; from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit; mpi = os.environ['RABBIT_SMOKE_MPI'].lower() == 'true'; r = run_rabbit(cube_thermomech_input_path(EElemType.HEX8, mpi=mpi), extra_args=['Executioner/end_time=1']); assert r.returncode == 0; print('Smoke solve OK')"
             if ($LASTEXITCODE -ne 0) { throw "Smoke solve failed" }
             Get-ChildItem *.e | ForEach-Object { Write-Host "Output: $($_.Name) ($($_.Length) bytes)" }
             if (-not (Get-ChildItem *.e)) { throw "No Exodus output produced" }
+          } finally {
+            Pop-Location
+          }
+
+      - name: "Smoke (windows MPI): Prove installed wheel runs two ranks"
+        if: inputs.platform == 'windows' && inputs.mpi
+        run: |
+          $SmokePython = "$env:RUNNER_TEMP\rabbit-smoke\Scripts\python.exe"
+          $SmokeExe = "$env:RUNNER_TEMP\rabbit-smoke\Scripts\rabbit.exe"
+          $MpiInput = & $SmokePython -c "from rabbit.sims import cube_thermomech_input_path, EElemType; print(cube_thermomech_input_path(EElemType.HEX8, mpi=True))"
+          if ($LASTEXITCODE -ne 0) { throw "Could not locate installed MPI HEX8 input" }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\rabbit-smoke-mpi-run" | Out-Null
+          Push-Location "$env:RUNNER_TEMP\rabbit-smoke-mpi-run"
+          try {
+            $RunLog = & mpiexec -n 2 $SmokeExe -i $MpiInput Executioner/end_time=1 2>&1 | Out-String
+            $RunExit = $LASTEXITCODE
+            Write-Host $RunLog
+            if ($RunExit -ne 0) { throw "Installed wheel two-rank solve failed (exit $RunExit)" }
+            if ($RunLog -notmatch '(?m)^\s*Num Processors:\s+2\b') { throw "Solve did not report two MPI ranks" }
+            $ExodusFiles = @(Get-ChildItem *.e -File -ErrorAction SilentlyContinue)
+            if ($ExodusFiles.Count -eq 0) { throw "Two-rank solve produced no Exodus output" }
+            $ExodusFiles | ForEach-Object { Write-Host "Output: $($_.Name) ($($_.Length) bytes)" }
           } finally {
             Pop-Location
           }

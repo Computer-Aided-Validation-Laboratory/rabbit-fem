@@ -57,12 +57,13 @@ Requires Python 3.11+ (CI builds and tests with Python 3.13).
 
 ### Serial and MPI variants
 
-The default `rabbit-fem` wheel is a serial/SMP build: it needs no
-system MPI installation and parallelises on one machine with
-`rabbit simulation.i --n-threads=N`. Only one variant may be installed
-at a time.
+The default `rabbit-fem` wheel needs no system MPI installation. On Linux and
+macOS it supports shared-memory threading with
+`rabbit simulation.i --n-threads=N`. The current Windows wheel is built
+without a libMesh thread model, so `--n-threads=N` does not provide parallel
+execution there. Only one variant may be installed at a time.
 
-For multi-rank runs with OpenMPI, install the OpenMPI variant (Linux only):
+For multi-rank runs on Linux with OpenMPI, install the OpenMPI variant:
 
 ```bash
 pip install rabbit-fem-mpi
@@ -72,7 +73,7 @@ pip install rabbit-fem-mpi
 mpirun -n 4 rabbit simulation.i
 ```
 
-The MPI variants additionally ship the `MFEM` finite element backend
+The Linux MPI variants additionally ship the `MFEM` finite element backend
 (parallel Nédélec/Maxwell and diffusion problems via `MFEMProblem`;
 see `src/rabbit/sims/mfem/`). Upstream MOOSE supports MFEM only with
 MPI, so the serial wheel excludes it.
@@ -103,6 +104,17 @@ separately (the launcher version must match the runtime):
 
 - **Linux (OpenMPI variant / `rabbit-fem-mpi`)**: OpenMPI runtime — `sudo apt-get install -y openmpi-bin`
 - **Linux (MPICH variant / `rabbit-fem-mpich`)**: MPICH runtime — `sudo apt-get install -y mpich`
+- **Windows (`rabbit-fem-mpi`)**: Install the [Microsoft MPI runtime](https://learn.microsoft.com/en-us/message-passing-interface/microsoft-mpi) and use its `mpiexec.exe`. This build does not include MFEM.
+
+For a Windows MPI wheel built by CI, download the `rabbit-fem-windows-mpi-wheel`
+artifact and install it in a clean environment. Once this wheel is published,
+`pip install rabbit-fem-mpi` can install it directly on Windows:
+
+```powershell
+$wheel = (Get-ChildItem .\rabbit_fem_mpi-*-win_amd64.whl | Select-Object -First 1).FullName
+pip install $wheel
+mpiexec -n 2 rabbit simulation_mpi.i
+```
 
 ---
 
@@ -134,7 +146,7 @@ Linux/macOS):
 rabbit simulation.i --n-threads=4
 ```
 
-Run multi-rank with the MPI variant (Linux only, see above):
+Run multi-rank with the MPI variant (use `mpiexec` on Windows, see above):
 
 ```bash
 mpirun -n 4 rabbit simulation.i
