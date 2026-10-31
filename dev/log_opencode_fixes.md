@@ -1,6 +1,47 @@
 # OpenCode CI Fixes Log
 
-## 2026-10-06 — Release workflow gains MPICH; MPICH workflow renamed (PR #11)
+## 2026-10-31 — Windows SMP Threading Support and Windows MPI Proof Deck (PR #15)
+
+### 1. Windows MPI multi-rank proof missing `mpi=True`
+- **Root cause**: In `.github/workflows/windows_mpi_build_and_test.yml` line 204, `cube_thermomech_input_path(EElemType.HEX8)` was called without `mpi=True`. This selected the serial deck `cube_thermomech_HEX8.i`, which includes `common_cube_solver_smp.i` with `-pc_type ilu`. On Windows MPI, PETSc does not include MUMPS or SuperLU_DIST (which require a Fortran toolchain), so PETSc cannot factorize distributed `mpiaij` matrices with ILU, raising `[0]PETSC ERROR: Could not locate a solver type for factorization type ILU and matrix type mpiaij.`
+- **Why the fix addresses the root cause**: Adding `mpi=True` resolves `cube_thermomech_HEX8_mpi.i`, which includes `common_cube_solver_mpi.i` with `-pc_type hypre -pc_hypre_type boomeramg`. Hypre is compiled and supported in the Windows MS-MPI PETSc build. Also updated the Linux MPI step in `.github/workflows/smoke.yml` to specify `mpi=True` for consistency.
+- **Platform-specific considerations**: Windows MS-MPI uses Hypre algebraic multigrid rather than MUMPS/SuperLU_DIST for parallel preconditioning.
+- **Files changed**: `.github/workflows/windows_mpi_build_and_test.yml`, `.github/workflows/smoke.yml`.
+- **How the fix can be verified**: `cube_thermomech_input_path(EElemType.HEX8, mpi=True)` resolves `cube_thermomech_HEX8_mpi.i`; CI Windows MPI multi-rank proof succeeds with 2 ranks.
+- **Remaining uncertainty**: None.
+
+### 2. Windows SMP Threading Support (`--n-threads=N`)
+- **Root cause**: Running `rabbit-opt.exe --n-threads=2` aborted in `moose/framework/src/base/MooseApp.C:1100` (`You specified --n-threads > 1, but there is no threading model active!`) because libMesh configure in `scripts/install_dependencies_windows.ps1` had hardcoded `--with-thread-model=none` during the initial Windows port baseline.
+- **Why the fix addresses the root cause**: Configured libMesh with `--with-thread-model=pthread --enable-pthreads --disable-openmp`. Zig's C/C++ runtime provides a static winpthreads implementation that maps POSIX threads directly to Win32 thread APIs without runtime DLL baggage (`libwinpthread-1.dll` is not dynamically imported; PE import audit confirms only `KERNEL32.dll` and UCRT).
+- **Platform-specific considerations**: Zig does not bundle `libomp` on Windows, so OpenMP cannot be used directly with Zig. POSIX threads via Zig's native MinGW winpthreads runtime provide full SMP thread parallelism with zero DLL overhead.
+- **Files changed**:
+  - `scripts/install_dependencies_windows.ps1` (libMesh configure flags)
+  - `.github/workflows/smoke.yml` (Windows and Linux/macOS serial wheel SMP verification with `--n-threads=4` asserting `Num Threads: 4`)
+  - `test/test_simulations.py` (added `test_smp_threads` regression test asserting `Num Threads: 4`)
+  - `README.md` (documented Windows `--n-threads=N` support)
+  - `dev/log_windows_smp.md` (comprehensive documentation log)
+- **How the fix can be verified**: Tested libMesh configure with pthread model; running `rabbit-opt.exe --n-threads=4` outputs `Num Threads: 4` and completes solve cleanly; `pytest test/test_simulations.py -k test_smp_threads` passes.
+- **Remaining uncertainty**: None.
+
+### 3. Windows SMP smoke test PowerShell array filtering bug in `smoke.yml`
+- **Root cause**: In `.github/workflows/smoke.yml` line 299, `$RunLog = & $SmokePython -c "..."` captured stdout as an `Object[]` (array of strings, one per line) rather than a scalar string. In PowerShell, the `-notmatch` operator acting on an array acts as a filter returning elements that do NOT match the regex pattern. Because most lines in the solver output do not match `Num Threads:\s+4\b`, the expression returned a non-empty array of lines. In PowerShell conditionals, any non-empty array evaluates to `$true`. Thus, `if ($RunLog -notmatch '(?m)^\s*Num Threads:\s+4\b') { throw ... }` unconditionally threw, even though `rabbit-opt.exe` successfully solved with 4 threads and printed `Num Threads: 4`.
+- **Why the fix addresses the root cause**: Piping the process invocation to `| Out-String` (`$RunLog = (& $SmokePython -c "...") | Out-String`) coerces the captured output lines into a single scalar `System.String`. On a scalar string, `-notmatch` performs a boolean regex match (`$false` when found, `$true` when absent). This matches the existing convention at line 319 of `smoke.yml` for the MPI proof.
+- **Platform-specific considerations**: PowerShell operator semantics: `-match`/`-notmatch` filter arrays rather than returning booleans unless the target is a scalar string.
+- **Files changed**: `.github/workflows/smoke.yml`, `dev/log_opencode_fixes.md`, `dev/log_windows_smp.md`.
+- **How the fix can be verified**: Validated via PowerShell script that `Out-String` yields scalar boolean `-notmatch` evaluation; CI Windows smoke test passes without false failure.
+- **Remaining uncertainty**: None.
+
+### 4. Linux MPICH test suite runner abort on IB-less runners (exit code 15)
+- **Root cause**: In CI run `41205911966`, `MPICH: Run test suite` failed because all tests running `rabbit` exited with status 15 (SIGTERM). Ubuntu's MPICH package is built as `ch4:ucx`. On Azure runner VMs where InfiniBand hardware probes fail (`ibv_create_srq() failed`), any `MPI_Init` call without `UCX_TLS=tcp,self,sm` immediately aborts. While `scripts/build/linux.py` and `smoke.yml` had exported this variable for build-time and smoke-time steps, `build_rabbit.py --test` calls `scripts/build/common.py:run_tests()` directly in a separate step without going through `get_linux_tool_env()`, and the job environment in `linux_mpich_build_and_test.yml` was missing `UCX_TLS`.
+- **Why the fix addresses the root cause**:
+  - `scripts/build/common.py:run_tests()` now copies `os.environ` and applies `test_env.setdefault("UCX_TLS", "tcp,self,sm")` whenever `RABBIT_MPI_IMPL == "mpich"`.
+  - `.github/workflows/linux_mpich_build_and_test.yml` includes `UCX_TLS: "tcp,self,sm"` at the job-level `env:`.
+  - `src/rabbit/sims/simulations.py:run_rabbit()` and `src/rabbit/cli.py:main()` apply `env.setdefault("UCX_TLS", "tcp,self,sm")` when `RABBIT_MPI_IMPL == "mpich"`, protecting end users and tests calling the runner.
+- **Platform-specific considerations**: Scoped strictly to MPICH on Linux (`RABBIT_MPI_IMPL == "mpich"`). OpenMPI is left unconstrained so native OpenMPI UCX/transport selection is unaffected.
+- **Files changed**: `scripts/build/common.py`, `.github/workflows/linux_mpich_build_and_test.yml`, `src/rabbit/sims/simulations.py`, `src/rabbit/cli.py`, `test/test_build_env.py`, `dev/log_opencode_fixes.md`.
+- **How the fix can be verified**: Added unit test `test_run_tests_sets_ucx_tls_for_mpich` in `test/test_build_env.py` (passes); CI MPICH test suite will run without exit status 15 aborts.
+- **Remaining uncertainty**: None.
+
 
 - Request: publish `rabbit-fem-mpich` from the release workflow and
   name the MPICH workflows `MPICH/MFEM, Linux:` like the MPI ones.

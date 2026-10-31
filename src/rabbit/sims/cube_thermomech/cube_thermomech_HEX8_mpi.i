@@ -8,22 +8,15 @@
 # Authors: scepticalrabbit (Lloyd Fletcher)
 # ------------------------------------------------------------------------------
 
-[Executioner]
-    type = Transient
+simName = cube_thermomech_HEX8_mpi
 
-    # Best options for thermal solve
-    solve_type = 'NEWTON'
-    petsc_options = '-snes_converged_reason'
-    petsc_options_iname = '-pc_type -pc_hypre_type -ksp_type -ksp_gmres_restart'
-    petsc_options_value = ' hypre boomeramg gmres 200'
+# Mesh Properties
+nElemX = 2
+nElemY = 2
+nElemZ = 2
+eType = HEX8
 
-    l_max_its = 200
-    l_tol = 1e-6
+!include common_cube_params.i
+!include common_cube_physics.i
 
-    nl_max_its = 50
-    nl_rel_tol = 1e-6
-    nl_abs_tol = 1e-6
-
-    end_time = ${endTime}
-    dt = ${timeStep}
-[]
+!include common_cube_solver_mpi.i

@@ -175,7 +175,7 @@ PeakYield = 240        # MPa, yield stress at the bump centre
     []
 []
 
-!include common_solver.i
+!include common_solver_smp.i
 
 [Postprocessors]
     [react_y_top]

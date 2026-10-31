@@ -57,5 +57,5 @@
     []
 []
 
-!include common_stc_solver.i
+!include common_stc_solver_smp.i
 !include common_stc_outputs.i

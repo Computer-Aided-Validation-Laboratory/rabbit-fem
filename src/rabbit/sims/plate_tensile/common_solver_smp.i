@@ -18,11 +18,13 @@
 [Executioner]
     type = Transient
 
-    # Best solver options for low element count large deformation plasticity
+    # Small plate meshes: measured LU faster than ILU and Hypre.
+    # Serial/SMP wheel.
+    automatic_scaling = false
     solve_type = 'NEWTON'
     petsc_options = '-snes_converged_reason'
     petsc_options_iname = '-pc_type -ksp_type -ksp_gmres_restart'
-    petsc_options_value = ' lu       gmres     200'
+    petsc_options_value = 'lu gmres 30'
 
     l_max_its = 100
     l_tol = 1e-6

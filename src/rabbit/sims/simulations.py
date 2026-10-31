@@ -58,20 +58,23 @@ def _sim_path(*parts: str) -> Path:
 # ------------------------------------------------------------------------------
 
 
-def cube_thermomech_input_path(elem_type: EElemType) -> Path:
+def cube_thermomech_input_path(elem_type: EElemType, *, mpi: bool = False) -> Path:
     """Get path to the cube thermo-mechanical MOOSE input file (.i).
 
     Parameters
     ----------
     elem_type : EElemType
         Element topology for the benchmark.
+    mpi : bool, default False
+        Select the MPI solver input instead of the serial/SMP input.
 
     Returns
     -------
     Path
         Path to the requested .i simulation file.
     """
-    filename = f"cube_thermomech_{elem_type.value}.i"
+    suffix = "_mpi" if mpi else ""
+    filename = f"cube_thermomech_{elem_type.value}{suffix}.i"
     target = _sim_path("cube_thermomech", filename)
     if not target.is_file():
         raise DataSetError(f"Cube simulation file not found: {target}")
@@ -107,6 +110,7 @@ def dogbone_input_path(
     dims: EDims = EDims.TWOD,
     *,
     is_plastic: bool = False,
+    mpi: bool = False,
 ) -> Path:
     """Get path to the dogbone simulation input file (.i).
 
@@ -116,6 +120,8 @@ def dogbone_input_path(
         Dimensionality of the simulation (2D or 3D).
     is_plastic : bool, default=False
         If True, returns the elastoplastic input file (3D only).
+    mpi : bool, default False
+        Select the MPI solver input.
 
     Returns
     -------
@@ -125,12 +131,10 @@ def dogbone_input_path(
     if dims == EDims.TWOD:
         if is_plastic:
             raise DataSetError("2D plastic dogbone case is not available.")
-        target = _sim_path("dogbone", "dogbone2d_elas.i")
+        filename = "dogbone2d_elas"
     else:
-        filename = (
-            "dogbone3d_plas_ad.i" if is_plastic else "dogbone3d_elas.i"
-        )
-        target = _sim_path("dogbone", filename)
+        filename = "dogbone3d_plas_ad" if is_plastic else "dogbone3d_elas"
+    target = _sim_path("dogbone", f"{filename}{'_mpi' if mpi else ''}.i")
 
     if not target.is_file():
         raise DataSetError(f"Dogbone input file not found: {target}")
@@ -156,7 +160,7 @@ def monoblock_geo_path() -> Path:
     return target
 
 
-def monoblock_input_path() -> Path:
+def monoblock_input_path(*, mpi: bool = False) -> Path:
     """Get path to the monoblock thermo-mechanical input file (.i).
 
     Returns
@@ -164,7 +168,8 @@ def monoblock_input_path() -> Path:
     Path
         Path to monoblock3d_thermomech.i.
     """
-    target = _sim_path("monoblock_thermomech", "monoblock3d_thermomech.i")
+    suffix = "_mpi" if mpi else ""
+    target = _sim_path("monoblock_thermomech", f"monoblock3d_thermomech{suffix}.i")
     if not target.is_file():
         raise DataSetError(f"Monoblock input file not found: {target}")
     return target
@@ -201,7 +206,7 @@ def plate_tensile_geo_path(case_name: str) -> Path:
     return target
 
 
-def plate_tensile_input_path(case_name: str) -> Path:
+def plate_tensile_input_path(case_name: str, *, mpi: bool = False) -> Path:
     """Get path to a plate tensile simulation input file (.i).
 
     Parameters
@@ -209,15 +214,16 @@ def plate_tensile_input_path(case_name: str) -> Path:
     case_name : str
         Simulation case stem (e.g. 'hole2d_elas', 'hole3d_elas',
         'notch2d_elas', 'notch3d_elas', 'hole2d_plas', etc.).
+    mpi : bool, default False
+        Select the MPI solver input.
 
     Returns
     -------
     Path
         Path to the .i file.
     """
-    filename = (
-        case_name if case_name.endswith(".i") else f"{case_name}.i"
-    )
+    stem = case_name.removesuffix(".i")
+    filename = f"{stem}{'_mpi' if mpi and not stem.endswith('_mpi') else ''}.i"
     target = _sim_path("plate_tensile", filename)
     if not target.is_file():
         raise DataSetError(f"Plate tensile input file not found: {target}")
@@ -243,22 +249,23 @@ def stc_geo_path() -> Path:
     return target
 
 
-def stc_input_path(case_name: str = "stc_therm_unifhf_wrad_std_ad") -> Path:
+def stc_input_path(case_name: str = "stc_therm_unifhf_wrad_std_ad", *, mpi: bool = False) -> Path:
     """Get path to an STC simulation input file (.i).
 
     Parameters
     ----------
     case_name : str, default='stc_therm_unifhf_wrad_std_ad'
         Input file name or stem.
+    mpi : bool, default False
+        Select the MPI solver input.
 
     Returns
     -------
     Path
         Path to the .i file.
     """
-    filename = (
-        case_name if case_name.endswith(".i") else f"{case_name}.i"
-    )
+    stem = case_name.removesuffix(".i")
+    filename = f"{stem}{'_mpi' if mpi and not stem.endswith('_mpi') else ''}.i"
     target = _sim_path("stc", filename)
     if not target.is_file():
         raise DataSetError(f"STC input file not found: {target}")
@@ -452,6 +459,8 @@ def run_rabbit(
             "Install the MPI variant instead: pip install rabbit-fem-mpi"
         )
     env = dict(os.environ)
+    if env.get("RABBIT_MPI_IMPL") == "mpich":
+        env.setdefault("UCX_TLS", "tcp,self,sm")
     if lib_dir.is_dir():
         curr_ld = env.get("LD_LIBRARY_PATH", "")
         env["LD_LIBRARY_PATH"] = (
@@ -459,9 +468,6 @@ def run_rabbit(
         )
 
     cmd = [str(bin_path), "-i", str(input_path)]
-    if not is_mpi_binary():
-        if not extra_args or not any("-pc_type" in arg for arg in extra_args):
-            cmd.extend(["-pc_type", "ilu"])
     if extra_args:
         cmd.extend(extra_args)
 

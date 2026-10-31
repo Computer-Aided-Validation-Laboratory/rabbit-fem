@@ -47,5 +47,5 @@
 
 !include common_monoblock_materials.i
 !include common_monoblock_bcs.i
-!include common_monoblock_solver.i
+!include common_monoblock_solver_smp.i
 !include common_monoblock_outputs.i

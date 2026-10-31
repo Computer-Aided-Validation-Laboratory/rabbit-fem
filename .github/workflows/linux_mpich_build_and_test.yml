@@ -25,6 +25,7 @@ jobs:
     env:
       RABBIT_MPI: "1"
       RABBIT_MPI_IMPL: "mpich"
+      UCX_TLS: "tcp,self,sm"
 
     steps:
       - name: "MPICH: Checkout repository"

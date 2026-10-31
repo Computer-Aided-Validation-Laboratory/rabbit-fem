@@ -44,7 +44,7 @@ simName = dogbone3d_elas
     []
 []
 
-!include common_dogbone_solver.i
+!include common_dogbone_solver_smp.i
 
 [Postprocessors]
     [react_y_top]

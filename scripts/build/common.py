@@ -1014,8 +1014,12 @@ def _build_wheel_inner(repo_dir: Path) -> Path:
 def run_tests(repo_dir: Path) -> None:
     """Run pytest suite against staged package."""
     print("--> Running pytest suite...")
+    test_env = dict(os.environ)
+    if test_env.get("RABBIT_MPI_IMPL") == "mpich":
+        test_env.setdefault("UCX_TLS", "tcp,self,sm")
     subprocess.run(
         [find_python_exe(), "-m", "pytest", "test/", "-v"],
         cwd=str(repo_dir),
+        env=test_env,
         check=True,
     )

@@ -807,6 +807,16 @@ jobs:
       artifact: rabbit-fem-windows-wheel
       runner: windows-latest
 
+  smoke-windows-mpi:
+    name: "MPI, Windows: Clean-machine smoke test"
+    needs: build-windows-mpi
+    uses: ./.github/workflows/smoke.yml
+    with:
+      platform: windows
+      artifact: rabbit-fem-windows-mpi-wheel
+      runner: windows-latest
+      mpi: true
+
   smoke-macos:
     name: "macOS: Clean-machine smoke test"
     needs: build-macos
@@ -839,7 +849,7 @@ jobs:
 
   publish:
     name: "Publish Consolidated Release to PyPI"
-    needs: [build-linux, build-windows, build-macos, build-mpi, build-mpich, smoke-linux, smoke-windows, smoke-macos, smoke-mpi, smoke-mpich]
+    needs: [build-linux, build-windows, build-windows-mpi, build-macos, build-mpi, build-mpich, smoke-linux, smoke-windows, smoke-windows-mpi, smoke-macos, smoke-mpi, smoke-mpich]
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     environment:
@@ -882,8 +892,9 @@ jobs:
           # rabbit_fem_mpi-*.whl and rabbit_fem_mpich-*.whl.
           # Glob the normalized stems, not the project names.
           mpi_count=$(ls dist/rabbit_fem_mpi-*.whl 2>/dev/null | wc -l)
+          win_mpi_count=$(ls dist/rabbit_fem_mpi-*win_amd64.whl 2>/dev/null | wc -l)
           mpich_count=$(ls dist/rabbit_fem_mpich-*.whl 2>/dev/null | wc -l)
-          echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s), $mac_count macOS wheel(s), $mpi_count MPI wheel(s) and $mpich_count MPICH wheel(s)."
+          echo "Found $linux_count Linux wheel(s), $win_count Windows wheel(s), $mac_count macOS wheel(s), $mpi_count MPI wheel(s), $win_mpi_count Windows MPI wheel(s), and $mpich_count MPICH wheel(s)."
           if [ "$linux_count" -lt 1 ]; then
             echo "::error::Missing Linux manylinux wheel in dist/!"
             exit 1
@@ -898,6 +909,10 @@ jobs:
           fi
           if [ "$mpi_count" -lt 1 ]; then
             echo "::error::Missing rabbit-fem-mpi wheel in dist/!"
+            exit 1
+          fi
+          if [ "$win_mpi_count" -lt 1 ]; then
+            echo "::error::Missing Windows rabbit-fem-mpi wheel in dist/!"
             exit 1
           fi
           if [ "$mpich_count" -lt 1 ]; then

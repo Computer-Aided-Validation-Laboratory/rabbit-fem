@@ -67,26 +67,10 @@
 []
 
 
-[Solvers]
-  inactive = 'jacobi'
-  [boomeramg]
-    type = MFEMHypreBoomerAMG
-  []
-  [jacobi]
-    type = MFEMOperatorJacobiSmoother
-  []
-  [main]
-    type = MFEMHypreGMRES
-    preconditioner = boomeramg
-    l_tol = 1e-16
-    l_max_its = 1000
-  []
-[]
 
-[Executioner]
-  type = MFEMSteady
-  device = cpu
-[]
+
+
+!include diffusion_solver_mpi.i
 
 [Postprocessors]
   [solution_l2_norm]

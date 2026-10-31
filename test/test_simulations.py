@@ -39,26 +39,46 @@ def test_dataset_paths_exist() -> None:
     """Verify all simulation dataset accessors point to existing files."""
     for elem in EElemType:
         assert cube_thermomech_input_path(elem).is_file()
+        assert cube_thermomech_input_path(elem, mpi=True).is_file()
 
     assert dogbone_geo_path(EDims.TWOD).is_file()
     assert dogbone_geo_path(EDims.THREED).is_file()
     assert dogbone_input_path(EDims.TWOD).is_file()
+    assert dogbone_input_path(EDims.TWOD, mpi=True).is_file()
     assert dogbone_input_path(EDims.THREED).is_file()
+    assert dogbone_input_path(EDims.THREED, mpi=True).is_file()
     assert dogbone_input_path(EDims.THREED, is_plastic=True).is_file()
+    assert dogbone_input_path(EDims.THREED, is_plastic=True, mpi=True).is_file()
 
     assert monoblock_geo_path().is_file()
     assert monoblock_input_path().is_file()
+    assert monoblock_input_path(mpi=True).is_file()
 
     assert plate_tensile_geo_path("hole2d").is_file()
     assert plate_tensile_geo_path("hole3d").is_file()
     assert plate_tensile_geo_path("notch2d").is_file()
     assert plate_tensile_geo_path("notch3d").is_file()
     assert plate_tensile_input_path("hole2d_elas").is_file()
+    assert plate_tensile_input_path("hole2d_elas", mpi=True).is_file()
     assert plate_tensile_input_path("hole3d_elas").is_file()
 
     assert stc_geo_path().is_file()
     assert stc_input_path("stc_therm_unifhf_wrad_std_ad").is_file()
+    assert stc_input_path("stc_therm_unifhf_wrad_std_ad", mpi=True).is_file()
     assert stc_data_path("ss316L_density_K.csv").is_file()
+
+
+def test_simulation_solver_includes_are_single_level() -> None:
+    """Every example has an MPI variant and common includes do not recurse."""
+    sims = Path(__file__).resolve().parents[1] / "src" / "rabbit" / "sims"
+    for folder in sims.iterdir():
+        if not folder.is_dir():
+            continue
+        for input_file in folder.glob("*.i"):
+            if input_file.name.startswith("common_") or "solver" in input_file.stem:
+                assert "!include" not in input_file.read_text()
+            elif not input_file.stem.endswith("_mpi"):
+                assert input_file.with_name(f"{input_file.stem}_mpi.i").is_file()
 
     for case in MFEM_CASES:
         assert mfem_input_path(case).is_file()
@@ -415,5 +435,30 @@ def test_binary_and_library_relocatability(tmp_path: Path) -> None:
                 if target_path.startswith("/home/"):
                     resolved_target = Path(target_path).resolve()
                     assert resolved_target.is_relative_to(lib_dir.resolve())
+
+
+def test_smp_threads(tmp_path: Path) -> None:
+    """Verify that SMP-style threading (--n-threads=4) executes with 4 threads and produces valid output."""
+    import re
+    from rabbit.cli import is_mpi_binary
+    from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit
+
+    is_mpi = is_mpi_binary()
+    input_file = cube_thermomech_input_path(EElemType.HEX8, mpi=is_mpi)
+    solve_dir = tmp_path / "smp_test_run"
+    solve_dir.mkdir(parents=True, exist_ok=True)
+
+    result = run_rabbit(
+        input_file,
+        extra_args=["Executioner/end_time=1", "--n-threads=4"],
+        cwd=solve_dir,
+    )
+    assert result.returncode == 0
+    assert re.search(r"Num Threads:\s+4\b", result.stdout), (
+        f"Solve did not report 4 threads in stdout:\n{result.stdout}"
+    )
+    exodus_files = list(solve_dir.glob("*.e"))
+    assert len(exodus_files) >= 1
+    assert exodus_files[0].stat().st_size > 0
 
 
