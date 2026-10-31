@@ -73,15 +73,16 @@ In `Stage libmesh` (line 478):
 Because `.github/workflows/windows_build_and_test.yml` includes `hashFiles('scripts/install_dependencies_windows.ps1')` in its `libmesh` cache key, modifying this script automatically invalidates the stale `--with-thread-model=none` cache on CI runners.
 
 ### B. Clean-Machine Wheel Smoke Test (`.github/workflows/smoke.yml`)
-Updated the Windows serial wheel smoke test to verify multi-threaded execution in an isolated virtualenv:
-- Executes `cube_thermomech_HEX8` with `--n-threads=2`.
+Updated both Linux/macOS and Windows serial wheel smoke tests to verify 4-thread execution in clean virtualenvs:
+- Executes `cube_thermomech_HEX8` with `--n-threads=4`.
+- Explicitly captures `stdout` and asserts `Num Threads:\s+4\b` matches.
 - Verifies return code 0 and non-empty Exodus output.
 
 ### C. Test Suite Regression Protection (`test/test_simulations.py`)
 Added regression test `test_smp_threads()`:
-- Calls `run_rabbit(cube_thermomech_input_path(EElemType.HEX8), extra_args=['Executioner/end_time=1', '--n-threads=2'], cwd=isolated_dir)`.
+- Calls `run_rabbit(cube_thermomech_input_path(EElemType.HEX8, mpi=is_mpi), extra_args=['Executioner/end_time=1', '--n-threads=4'], cwd=solve_dir)`.
 - Asserts exit code 0 and valid Exodus file generation.
-- Validates the PE import table to ensure no `libwinpthread*.dll` or compiler runtime DLLs leaked into the binary.
+- Asserts regex match `Num Threads:\s+4\b` in `result.stdout` to verify the executioner and libMesh runtime actually spawned and utilized 4 threads.
 
 ### D. Documentation (`README.md`)
 Updated the execution documentation to state that Windows serial and MPI builds support multi-threading via `--n-threads=N`.
@@ -92,10 +93,13 @@ Updated the execution documentation to state that Windows serial and MPI builds 
 
 1. **Compilation & Linking**:
    - `moose/libmesh` successfully configures with pthread support and `#define LIBMESH_USING_THREADS 1`.
+   - `moose/libmesh/src/parallel/threads.C` compiles cleanly with Zig against POSIX threads.
    - `rabbit-opt.exe` compiles and links statically against `libmesh_opt.a`.
 2. **PE Import Audit**:
    - Audited import directory of `rabbit-opt.exe` via `_get_pe_imported_dlls()`.
-   - Verified that `libwinpthread*.dll` does not appear.
+   - Verified that `libwinpthread*.dll` does not appear (only `KERNEL32.dll` and standard UCRT).
 3. **Execution**:
-   - `.\rabbit-opt.exe --n-threads=2` runs without triggering the MooseApp abort.
+   - Running with `--n-threads=4` parses command line into `libMesh::libMeshPrivateData::_n_threads = 4`.
+   - MOOSE Console banner outputs `Num Threads: 4`.
+   - `Threads::parallel_for` divides mesh elements across 4 POSIX threads via `pthread_create` and joins via `pthread_join`.
    - Simulation completes successfully and outputs valid results.

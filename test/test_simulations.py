@@ -438,7 +438,8 @@ def test_binary_and_library_relocatability(tmp_path: Path) -> None:
 
 
 def test_smp_threads(tmp_path: Path) -> None:
-    """Verify that SMP-style threading (--n-threads=2) executes and produces valid output."""
+    """Verify that SMP-style threading (--n-threads=4) executes with 4 threads and produces valid output."""
+    import re
     from rabbit.cli import is_mpi_binary
     from rabbit.sims import cube_thermomech_input_path, EElemType, run_rabbit
 
@@ -449,10 +450,13 @@ def test_smp_threads(tmp_path: Path) -> None:
 
     result = run_rabbit(
         input_file,
-        extra_args=["Executioner/end_time=1", "--n-threads=2"],
+        extra_args=["Executioner/end_time=1", "--n-threads=4"],
         cwd=solve_dir,
     )
     assert result.returncode == 0
+    assert re.search(r"Num Threads:\s+4\b", result.stdout), (
+        f"Solve did not report 4 threads in stdout:\n{result.stdout}"
+    )
     exodus_files = list(solve_dir.glob("*.e"))
     assert len(exodus_files) >= 1
     assert exodus_files[0].stat().st_size > 0

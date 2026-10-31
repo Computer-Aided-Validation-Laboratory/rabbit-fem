@@ -16,11 +16,11 @@
 - **Platform-specific considerations**: Zig does not bundle `libomp` on Windows, so OpenMP cannot be used directly with Zig. POSIX threads via Zig's native MinGW winpthreads runtime provide full SMP thread parallelism with zero DLL overhead.
 - **Files changed**:
   - `scripts/install_dependencies_windows.ps1` (libMesh configure flags)
-  - `.github/workflows/smoke.yml` (Windows serial wheel SMP verification with `--n-threads=2`)
-  - `test/test_simulations.py` (added `test_smp_threads` regression test)
+  - `.github/workflows/smoke.yml` (Windows and Linux/macOS serial wheel SMP verification with `--n-threads=4` asserting `Num Threads: 4`)
+  - `test/test_simulations.py` (added `test_smp_threads` regression test asserting `Num Threads: 4`)
   - `README.md` (documented Windows `--n-threads=N` support)
   - `dev/log_windows_smp.md` (comprehensive documentation log)
-- **How the fix can be verified**: Tested libMesh configure with pthread model; running `rabbit-opt.exe --n-threads=2` completes solve cleanly; `pytest test/test_simulations.py -k test_smp_threads` passes.
+- **How the fix can be verified**: Tested libMesh configure with pthread model; running `rabbit-opt.exe --n-threads=4` outputs `Num Threads: 4` and completes solve cleanly; `pytest test/test_simulations.py -k test_smp_threads` passes.
 - **Remaining uncertainty**: None.
 
 
