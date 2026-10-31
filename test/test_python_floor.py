@@ -13,9 +13,10 @@
 Colleague report: a system Python 3.9 venv installed the wheel and died
 at import with ``TypeError: unsupported operand type(s) for |`` from
 ``rabbit/sims/simulations.py``. The package uses PEP 604 ``X | Y``
-annotations, which evaluate at ``def`` time and require 3.10+. These
-tests pin the declared floor and the fail-fast guard so the failure
-mode is a clear message, not a deep TypeError.
+annotations, which evaluate at ``def`` time and require 3.10+. Python
+3.10 reached end-of-life in October 2026, so the supported floor is now
+3.11. These tests pin the declared floor and the fail-fast guard so the
+failure mode is a clear message, not a deep TypeError.
 """
 
 from pathlib import Path
@@ -28,8 +29,8 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def test_requires_python_floor_is_3_10() -> None:
-    """Declared floor must match the syntax the code actually uses."""
+def test_requires_python_floor_is_3_11() -> None:
+    """Declared floor must match the supported interpreters."""
     # NOTE: parsed with a regex, not tomllib, so this test itself runs
     # on 3.10 where tomllib does not exist yet.
     pyproject = (_repo_root() / "pyproject.toml").read_text(
@@ -38,9 +39,12 @@ def test_requires_python_floor_is_3_10() -> None:
     match = re.search(r'requires-python\s*=\s*"([^"]+)"', pyproject)
     assert match is not None, "requires-python missing from pyproject.toml"
     requires = match.group(1)
-    assert "3.10" in requires, (
-        f"requires-python must declare the 3.10 floor "
-        f"(PEP 604 unions need 3.10+), got: {requires!r}"
+    assert "3.11" in requires, (
+        f"requires-python must declare the 3.11 floor "
+        f"(3.10 is end-of-life), got: {requires!r}"
+    )
+    assert "3.10" not in requires, (
+        f"requires-python must not admit 3.10, got: {requires!r}"
     )
     assert "3.9" not in requires, (
         f"requires-python must not admit 3.9, got: {requires!r}"
@@ -49,8 +53,8 @@ def test_requires_python_floor_is_3_10() -> None:
 
 def test_package_imports_on_supported_interpreter() -> None:
     """The modules that use PEP 604 unions import cleanly here."""
-    assert sys.version_info >= (3, 10), (
-        f"This test itself needs 3.10+ (running {sys.version.split()[0]})"
+    assert sys.version_info >= (3, 11), (
+        f"This test itself needs 3.11+ (running {sys.version.split()[0]})"
     )
     import rabbit  # noqa: F401
     import rabbit.exodus  # noqa: F401
@@ -68,5 +72,5 @@ def test_version_guard_runs_before_submodule_imports() -> None:
     assert sims_pos != -1, "expected submodule import in __init__.py"
     assert guard_pos < sims_pos, (
         "version guard must run before submodule imports, otherwise "
-        "Python 3.9 dies with TypeError before reaching the message"
+        "unsupported Python versions die before reaching the message"
     )

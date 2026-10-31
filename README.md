@@ -6,7 +6,7 @@
 
 <p align="center">
     <a href="https://pypi.org/project/rabbit-fem/"><img src="https://img.shields.io/pypi/v/rabbit-fem?label=PyPI" alt="PyPI version"></a>
-    <a href="https://pypi.org/project/rabbit-fem/"><img src="https://img.shields.io/badge/python-3.10+-3776AB?logo=python&logoColor=white" alt="Supported Python versions"></a>
+    <a href="https://pypi.org/project/rabbit-fem/"><img src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white" alt="Supported Python versions"></a>
     <a href="https://ziglang.org/download/"><img src="https://img.shields.io/badge/Zig-0.16.0-F7A41D?logo=zig&logoColor=white" alt="Zig version"></a>
     <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/linux_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/linux_build_and_test.yml?branch=main&label=Linux" alt="Linux Tests"></a>
     <a href="https://github.com/Computer-Aided-Validation-Laboratory/rabbit-fem/actions/workflows/macos_build_and_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/Computer-Aided-Validation-Laboratory/rabbit-fem/macos_build_and_test.yml?branch=main&label=macOS" alt="macOS Tests"></a>
@@ -53,7 +53,7 @@ pip install dist/rabbit_fem-*.whl
 uv pip install dist/rabbit_fem-*.whl
 ```
 
-Requires Python 3.10+ (CI builds and tests with Python 3.13).
+Requires Python 3.11+ (CI builds and tests with Python 3.13).
 
 ### Serial and MPI variants
 
@@ -238,7 +238,7 @@ Upstream MOOSE sources are pinned (`moose_version.txt` plus the `moose_deps.txt`
 
 - **OS**: Linux x86_64 (Ubuntu 22.04+ or compatible)
 - **System packages**: `build-essential`, `gfortran`, `libopenmpi-dev`, `openmpi-bin`, `patchelf`, `libtirpc-dev`, `libomp-dev`, `libglu1-mesa`
-- **Python**: Python 3.10+ with [`uv`](https://docs.astral.sh/uv/)
+- **Python**: Python 3.11+ with [`uv`](https://docs.astral.sh/uv/)
 
 ```bash
 sudo apt-get update && sudo apt-get install -y \
@@ -280,7 +280,7 @@ uv run python build_rabbit.py --wheel --test
 
 #### Prerequisites (Windows)
 
-1. **Python 3.10+** (with [`uv`](https://docs.astral.sh/uv/)):
+1. **Python 3.11+** (with [`uv`](https://docs.astral.sh/uv/)):
    ```powershell
    winget install astral-sh.uv
    ```
@@ -363,7 +363,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install_dependencies_windows.ps
 
 - **OS**: macOS on Apple Silicon (arm64) or Intel (x86_64)
 - **Homebrew packages**: `open-mpi`, `gcc`, `llvm`, `libomp`, `libpng`, `hdf5-mpi`, `bison`, `flex`, `pkgconf`, `cmake`
-- **Python**: Python 3.10+ with [`uv`](https://docs.astral.sh/uv/)
+- **Python**: Python 3.11+ with [`uv`](https://docs.astral.sh/uv/)
 
 ```bash
 brew install open-mpi gcc llvm libomp libpng hdf5-mpi bison flex pkgconf cmake
