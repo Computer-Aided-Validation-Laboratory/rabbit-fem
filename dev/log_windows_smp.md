@@ -103,3 +103,12 @@ Updated the execution documentation to state that Windows serial and MPI builds 
    - MOOSE Console banner outputs `Num Threads: 4`.
    - `Threads::parallel_for` divides mesh elements across 4 POSIX threads via `pthread_create` and joins via `pthread_join`.
    - Simulation completes successfully and outputs valid results.
+
+---
+
+## 5. CI Observations and PowerShell Smoke Assertion Fix
+
+- **Test Suite Verification**: In CI run `41200265079` (`Windows: Build Wheel and Test`), `test_smp_threads` in `test/test_simulations.py` passed cleanly (100% pass across all 118 test cases).
+- **Smoke Assertion Failure**: In `Clean-machine smoke test (windows)`, the solver successfully converged and printed `Num Threads: 4`. However, the step failed with `Solve did not report four threads`.
+- **Cause**: In PowerShell, assigning external command output (`$RunLog = & $SmokePython ...`) produces a `System.Object[]` (array of lines). Applying `-notmatch` to an array returns all lines *not* matching the regex. Any non-empty collection evaluates as truthy in PowerShell `if ($condition)`, causing `if ($RunLog -notmatch ...) { throw }` to throw unconditionally.
+- **Fix**: Added `| Out-String` to pipe the output into a single scalar string (`$RunLog = (& $SmokePython ...) | Out-String`), enabling scalar boolean `-notmatch` matching identical to line 319 in `smoke.yml`.

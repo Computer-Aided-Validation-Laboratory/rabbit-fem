@@ -23,6 +23,14 @@
 - **How the fix can be verified**: Tested libMesh configure with pthread model; running `rabbit-opt.exe --n-threads=4` outputs `Num Threads: 4` and completes solve cleanly; `pytest test/test_simulations.py -k test_smp_threads` passes.
 - **Remaining uncertainty**: None.
 
+### 3. Windows SMP smoke test PowerShell array filtering bug in `smoke.yml`
+- **Root cause**: In `.github/workflows/smoke.yml` line 299, `$RunLog = & $SmokePython -c "..."` captured stdout as an `Object[]` (array of strings, one per line) rather than a scalar string. In PowerShell, the `-notmatch` operator acting on an array acts as a filter returning elements that do NOT match the regex pattern. Because most lines in the solver output do not match `Num Threads:\s+4\b`, the expression returned a non-empty array of lines. In PowerShell conditionals, any non-empty array evaluates to `$true`. Thus, `if ($RunLog -notmatch '(?m)^\s*Num Threads:\s+4\b') { throw ... }` unconditionally threw, even though `rabbit-opt.exe` successfully solved with 4 threads and printed `Num Threads: 4`.
+- **Why the fix addresses the root cause**: Piping the process invocation to `| Out-String` (`$RunLog = (& $SmokePython -c "...") | Out-String`) coerces the captured output lines into a single scalar `System.String`. On a scalar string, `-notmatch` performs a boolean regex match (`$false` when found, `$true` when absent). This matches the existing convention at line 319 of `smoke.yml` for the MPI proof.
+- **Platform-specific considerations**: PowerShell operator semantics: `-match`/`-notmatch` filter arrays rather than returning booleans unless the target is a scalar string.
+- **Files changed**: `.github/workflows/smoke.yml`, `dev/log_opencode_fixes.md`, `dev/log_windows_smp.md`.
+- **How the fix can be verified**: Validated via PowerShell script that `Out-String` yields scalar boolean `-notmatch` evaluation; CI Windows smoke test passes without false failure.
+- **Remaining uncertainty**: None.
+
 
 - Request: publish `rabbit-fem-mpich` from the release workflow and
   name the MPICH workflows `MPICH/MFEM, Linux:` like the MPI ones.
